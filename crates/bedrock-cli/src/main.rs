@@ -166,6 +166,13 @@ fn report(event: &Event, options: &Options, captured: &mut usize) -> Result<(), 
         Event::WorldSent(peer) => {
             println!("  -> StartGame  {peer}  (mundo flat, paleta de blocos vazia)");
         }
+        Event::ChunkRadiusGranted {
+            peer,
+            requested,
+            granted,
+        } => {
+            println!("  -> ChunkRadiusUpdated  {peer}  pediu {requested}, concedido {granted}");
+        }
         Event::Decrypted { peer, id, len } => {
             println!("cifrado ok    {peer}  packet {id}, {len} bytes decifrados");
         }
