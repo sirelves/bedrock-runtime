@@ -10,6 +10,7 @@
 use bedrock_crypto::agreement::ServerKey;
 use bedrock_crypto::cipher::Cipher;
 use bedrock_crypto::handshake as token;
+use bedrock_crypto::probe;
 use bedrock_protocol::batch;
 use bedrock_protocol::handshake::{
     ID_CLIENT_TO_SERVER_HANDSHAKE, ID_REQUEST_NETWORK_SETTINGS, NetworkSettings,
@@ -74,6 +75,15 @@ pub enum Event {
     /// An encrypted packet did not decrypt. The derivation, the IV or the checksum
     /// formula is wrong, and they all fail this way.
     DecryptionFailed(SocketAddr),
+    /// A search over the key-schedule variants found one that verifies.
+    VariantFound {
+        /// Who sent the packet it was found with.
+        peer: SocketAddr,
+        /// The combination, ready to be written into the cipher.
+        variant: String,
+        /// What it decrypted to.
+        plaintext: Vec<u8>,
+    },
     /// A batch arrived compressed with a method we cannot read yet.
     Compressed {
         /// Who sent it.
@@ -112,6 +122,8 @@ pub struct Server {
     keys: HashMap<SocketAddr, ServerKey>,
     /// The encrypted stream, once a peer has one.
     ciphers: HashMap<SocketAddr, Cipher>,
+    /// The client's public key, kept so a failed decryption can be searched.
+    client_keys: HashMap<SocketAddr, Vec<u8>>,
 }
 
 impl Server {
@@ -132,6 +144,7 @@ impl Server {
             settled: HashSet::new(),
             keys: HashMap::new(),
             ciphers: HashMap::new(),
+            client_keys: HashMap::new(),
         }
     }
 
@@ -167,6 +180,7 @@ impl Server {
                     self.settled.remove(&peer);
                     self.keys.remove(&peer);
                     self.ciphers.remove(&peer);
+                    self.client_keys.remove(&peer);
                     events.push(Event::Disconnected(peer));
                 }
                 RakEvent::Payload(peer, payload) => {
@@ -183,10 +197,10 @@ impl Server {
             let Some(body) = payload.strip_prefix(&[batch::MARKER]) else {
                 return vec![Event::Undecodable(peer, payload.to_vec())];
             };
-            let Ok(plaintext) = cipher.decrypt(body) else {
-                return vec![Event::DecryptionFailed(peer)];
-            };
-            return self.on_plaintext(peer, &plaintext, now);
+            match cipher.decrypt(body) {
+                Ok(plaintext) => return self.on_plaintext(peer, &plaintext, now),
+                Err(_) => return self.on_decryption_failure(peer, body),
+            }
         }
 
         let packets = if self.settled.contains(&peer) {
@@ -261,6 +275,7 @@ impl Server {
             if let Ok(session) = key.agree(&client_key, &salt) {
                 self.ciphers.insert(peer, Cipher::new(&session));
             }
+            self.client_keys.insert(peer, client_key);
         }
         self.keys.insert(peer, key);
 
@@ -292,6 +307,30 @@ fn client_public_key(identity: &str) -> Option<Vec<u8>> {
 }
 
 impl Server {
+    /// Searches the key-schedule variants when our own guess did not verify.
+    ///
+    /// Every wrong guess fails identically, at the checksum, so trying them one per
+    /// connection means one round trip through a human per attempt. The search covers
+    /// the space against the packet already in hand.
+    fn on_decryption_failure(&mut self, peer: SocketAddr, ciphertext: &[u8]) -> Vec<Event> {
+        let Some(key) = self.keys.get(&peer) else {
+            return vec![Event::DecryptionFailed(peer)];
+        };
+        let Some(client_der) = self.client_keys.get(&peer) else {
+            return vec![Event::DecryptionFailed(peer)];
+        };
+
+        let salt = *key.salt();
+        match probe::search(key, client_der, &salt, ciphertext) {
+            Ok(Some(found)) => vec![Event::VariantFound {
+                peer,
+                variant: found.variant.to_string(),
+                plaintext: found.plaintext,
+            }],
+            _ => vec![Event::DecryptionFailed(peer)],
+        }
+    }
+
     /// Handles packets that came out of the encrypted stream.
     fn on_plaintext(&mut self, peer: SocketAddr, plaintext: &[u8], _now: Instant) -> Vec<Event> {
         let Ok(packets) = batch::decode_packets(bedrock_protocol::bytes::Reader::new(

@@ -166,6 +166,16 @@ impl ServerKey {
         out
     }
 
+    /// The raw ECDH output, for [`crate::probe`] to try derivations against.
+    ///
+    /// Crate-private: the shared secret is the one value that must not leave here.
+    pub(crate) fn shared_secret(&self, peer_der: &[u8]) -> Result<Vec<u8>, AgreementError> {
+        let point = point_from_der(peer_der)?;
+        let peer = PublicKey::from_sec1_bytes(point).map_err(|_| AgreementError::BadPeerKey)?;
+        let shared = diffie_hellman(self.signing.as_nonzero_scalar(), peer.as_affine());
+        Ok(shared.raw_secret_bytes().to_vec())
+    }
+
     /// Agrees with a peer's public key and derives the session key.
     ///
     /// Takes the salt rather than always using our own, so the same code works from

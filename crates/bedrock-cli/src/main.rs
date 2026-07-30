@@ -98,6 +98,15 @@ fn report(event: &Event, options: &Options, captured: &mut usize) -> Result<(), 
         Event::Decrypted { peer, id, len } => {
             println!("cifrado ok    {peer}  packet {id}, {len} bytes decifrados");
         }
+        Event::VariantFound {
+            peer,
+            variant,
+            plaintext,
+        } => {
+            println!("VARIANTE ENCONTRADA  {peer}");
+            println!("  {variant}");
+            println!("  texto claro: {}", head(plaintext));
+        }
         Event::DecryptionFailed(peer) => {
             println!("FALHA AO DECIFRAR  {peer}");
             println!("  a derivacao, o IV ou a formula do checksum esta errada");
