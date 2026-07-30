@@ -5,7 +5,9 @@
 //!
 //! Game logic in this crate is a bug.
 
-use bedrock_server::server::{DEFAULT_PORT, Event, Server, TARGET_PROTOCOL, advertisement};
+use bedrock_server::server::{
+    DEFAULT_PORT, Event, Jwks, Server, TARGET_PROTOCOL, TOKEN_KEYS_URL, advertisement,
+};
 use std::error::Error;
 use std::net::UdpSocket;
 use std::path::Path;
@@ -13,10 +15,33 @@ use std::time::{Duration, Instant};
 
 const GUID: i64 = 0x0bed_0c00_0000_0003;
 
+/// How often the issuer's keys are fetched again.
+///
+/// Keys rotate, and a server that fetched once at boot starts refusing every login the
+/// day they do. An hour is far below any published rotation period and costs one HTTP
+/// request.
+const KEY_REFRESH: Duration = Duration::from_secs(3600);
+
 struct Options {
     port: u16,
     name: String,
     dump: Option<String>,
+}
+
+/// Fetches the issuer's signing keys.
+fn fetch_identity_keys() -> Result<Jwks, Box<dyn Error>> {
+    let body = ureq::get(TOKEN_KEYS_URL)
+        .call()?
+        .body_mut()
+        .read_to_string()?;
+    Ok(Jwks::parse(&body)?)
+}
+
+fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
+        .unwrap_or(0)
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -39,11 +64,33 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
     println!("ctrl-c to stop\n");
 
+    // Fetched before the socket does anything: a login that arrives before the keys do
+    // cannot be verified, and this server refuses what it cannot verify.
+    match fetch_identity_keys() {
+        Ok(keys) => {
+            server.set_identity_keys(keys, unix_now(), Instant::now());
+            println!("identidade    chaves do emissor carregadas");
+        }
+        Err(e) => {
+            eprintln!("identidade    NAO foi possivel buscar as chaves: {e}");
+            eprintln!("              todo login sera recusado ate a proxima tentativa");
+        }
+    }
+    let mut last_refresh = Instant::now();
+
     let mut captured = 0usize;
     let mut buf = [0u8; 2048];
 
     loop {
         let now = Instant::now();
+
+        if now.duration_since(last_refresh) >= KEY_REFRESH {
+            last_refresh = now;
+            match fetch_identity_keys() {
+                Ok(keys) => server.set_identity_keys(keys, unix_now(), now),
+                Err(e) => eprintln!("identidade    falha ao renovar as chaves: {e}"),
+            }
+        }
         let mut events = Vec::new();
 
         if let Ok((len, from)) = socket.recv_from(&mut buf) {
@@ -80,16 +127,23 @@ fn report(event: &Event, options: &Options, captured: &mut usize) -> Result<(), 
             println!("  head  {}", head(body));
             save(options, captured, &format!("packet-{id}"), body)?;
         }
-        Event::LoginReceived {
+        Event::LoginAccepted {
             peer,
             client_protocol,
-            identity,
+            gamertag,
         } => {
             println!(
-                "login         {peer}  protocol {client_protocol}, identity {} bytes",
-                identity.len()
+                "login OK      {peer}  protocol {client_protocol}, identidade verificada{}",
+                gamertag
+                    .as_deref()
+                    .map(|g| format!(", jogador {g}"))
+                    .unwrap_or_default()
             );
             println!("  -> ServerToClientHandshake, encryption starts after this");
+        }
+        Event::LoginRejected { peer, reason } => {
+            println!("login RECUSADO {peer}");
+            println!("  {reason}");
         }
         Event::HandshakeAccepted(peer) => {
             println!("HANDSHAKE ACEITO  {peer}");

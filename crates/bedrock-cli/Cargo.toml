@@ -9,6 +9,7 @@ authors.workspace = true
 
 [dependencies]
 bedrock-server.workspace = true
+ureq = "3"
 
 [lints]
 workspace = true

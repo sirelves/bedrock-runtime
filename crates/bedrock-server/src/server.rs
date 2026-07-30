@@ -7,15 +7,17 @@
 //! It answers `RequestNetworkSettings` and nothing else yet. Everything past that is
 //! reported so a capture can be taken of bytes no third-party documentation covers.
 
+use base64::Engine;
 use bedrock_crypto::agreement::ServerKey;
 use bedrock_crypto::cipher::Cipher;
 use bedrock_crypto::handshake as token;
+use bedrock_crypto::jwt::{self, Expected};
 use bedrock_protocol::batch;
 use bedrock_protocol::handshake::{
     ID_CLIENT_TO_SERVER_HANDSHAKE, ID_REQUEST_NETWORK_SETTINGS, NetworkSettings,
     RequestNetworkSettings, server_to_client_handshake,
 };
-use bedrock_protocol::login::{self, ID_LOGIN, Login};
+use bedrock_protocol::login::{self, ID_LOGIN, Login, TOKEN_AUDIENCE, TOKEN_ISSUER};
 use bedrock_protocol::play_status::{self, Status};
 use bedrock_protocol::version::{MINECRAFT_VERSION, PROTOCOL_VERSION};
 use bedrock_raknet::listener::{Event as RakEvent, Listener, ListenerConfig};
@@ -29,6 +31,11 @@ pub const DEFAULT_PORT: u16 = bedrock_raknet::DEFAULT_PORT_V4;
 
 /// The protocol version this server speaks.
 pub const TARGET_PROTOCOL: u32 = PROTOCOL_VERSION;
+
+/// Where the identity issuer publishes its signing keys.
+pub const TOKEN_KEYS_URL: &str = bedrock_protocol::login::TOKEN_KEYS_URL;
+
+pub use bedrock_crypto::jwt::Jwks;
 
 /// Something worth telling the operator about.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,15 +58,21 @@ pub enum Event {
         /// Its body.
         body: Vec<u8>,
     },
-    /// A client presented a login. The identity is not verified here — that needs the
-    /// issuer's keys, which live outside this crate.
-    LoginReceived {
+    /// A client presented a login and its identity token verified.
+    LoginAccepted {
         /// Who logged in.
         peer: SocketAddr,
         /// The protocol version the login declares.
         client_protocol: u32,
-        /// The identity document, verbatim.
-        identity: String,
+        /// The gamertag the issuer vouched for, when the token carried one.
+        gamertag: Option<String>,
+    },
+    /// A login was refused because its identity did not hold up.
+    LoginRejected {
+        /// Who tried.
+        peer: SocketAddr,
+        /// Why, in the issuer's terms.
+        reason: String,
     },
     /// A client accepted our handshake and switched to an encrypted stream.
     HandshakeAccepted(SocketAddr),
@@ -122,6 +135,12 @@ pub struct Server {
     ciphers: HashMap<SocketAddr, Cipher>,
     /// The protocol version each peer declared at login.
     protocols: HashMap<SocketAddr, u32>,
+    /// The issuer's published keys, and when they were set. Empty until the caller
+    /// supplies them, and a login cannot be verified without them.
+    identity_keys: Option<Jwks>,
+    /// Wall-clock anchor: the caller reads the clock once, and everything after is
+    /// measured from the monotonic instant it was read at.
+    clock: Option<(i64, Instant)>,
 }
 
 impl Server {
@@ -143,7 +162,31 @@ impl Server {
             keys: HashMap::new(),
             ciphers: HashMap::new(),
             protocols: HashMap::new(),
+            identity_keys: None,
+            clock: None,
         }
+    }
+
+    /// Supplies the issuer's signing keys, and anchors wall-clock time.
+    ///
+    /// Fetching these is I/O and belongs to the caller. Until they arrive no login can
+    /// be verified, and an unverifiable login is refused rather than waved through:
+    /// a server that silently stops checking identities when a fetch fails is worse
+    /// than one that never checked.
+    pub fn set_identity_keys(&mut self, keys: Jwks, unix_now: i64, now: Instant) {
+        self.identity_keys = Some(keys);
+        self.clock = Some((unix_now, now));
+    }
+
+    /// Whether logins can be verified at all.
+    pub fn can_verify_identity(&self) -> bool {
+        self.identity_keys.is_some() && self.clock.is_some()
+    }
+
+    fn unix_now(&self, now: Instant) -> Option<i64> {
+        let (anchor_unix, anchor) = self.clock?;
+        let elapsed = i64::try_from(now.saturating_duration_since(anchor).as_secs()).ok()?;
+        Some(anchor_unix + elapsed)
     }
 
     /// Peers currently connected or connecting.
@@ -251,24 +294,37 @@ impl Server {
 }
 
 impl Server {
-    /// Answers a login with our public key and salt.
+    /// Verifies a login and, if it holds, answers with our public key and salt.
     ///
-    /// The identity is reported rather than verified: verification needs the issuer's
-    /// published keys, and fetching those is I/O, which does not belong in a sans-io
-    /// layer. The caller decides whether to trust what it is told.
+    /// A refused login is told so in the clear, before encryption starts: there is no
+    /// encrypted channel to say it on yet, and the alternative is a client staring at a
+    /// connecting screen with no explanation.
     fn on_login(&mut self, peer: SocketAddr, body: &[u8], now: Instant) -> Vec<Event> {
         let Ok(login) = Login::decode(body, &login::Limits::default()) else {
             return vec![Event::Undecodable(peer, body.to_vec())];
+        };
+
+        let claims = match self.verify_identity(login.identity, now) {
+            Ok(claims) => claims,
+            Err(reason) => {
+                let refusal =
+                    batch::encode_with_method(&[play_status::packet(Status::InvalidTenant)]);
+                let _ = self.listener.send(peer, refusal, now);
+                return vec![Event::LoginRejected { peer, reason }];
+            }
         };
 
         let key = ServerKey::generate();
         let reply = batch::encode_with_method(&[server_to_client_handshake(&token::token(&key))]);
         let _ = self.listener.send(peer, reply, now);
 
-        // The client's public key travels inside the identity token, which this layer
-        // does not verify. Agreement uses it either way; verification is what says the
-        // key belongs to who it claims, and that is the caller's business.
-        if let Some(client_key) = client_public_key(login.identity) {
+        // The key to agree with is the one the issuer signed for, not whatever the
+        // login also happens to carry: that is the whole point of having verified it.
+        if let Some(client_key) = claims
+            .cpk
+            .as_deref()
+            .and_then(|cpk| base64::engine::general_purpose::STANDARD.decode(cpk).ok())
+        {
             let salt = *key.salt();
             if let Ok(session) = key.agree(&client_key, &salt) {
                 self.ciphers.insert(peer, Cipher::new(&session));
@@ -277,31 +333,36 @@ impl Server {
         self.keys.insert(peer, key);
         self.protocols.insert(peer, login.client_protocol);
 
-        vec![Event::LoginReceived {
+        vec![Event::LoginAccepted {
             peer,
             client_protocol: login.client_protocol,
-            identity: login.identity.to_owned(),
+            gamertag: claims.xname,
         }]
     }
-}
 
-/// Pulls the client's public key out of an identity document.
-///
-/// The claims are read without verifying the signature: this is the key we agree with,
-/// and whether it belongs to who the token says is a separate question, answered
-/// elsewhere with the issuer's published keys.
-fn client_public_key(identity: &str) -> Option<Vec<u8>> {
-    use base64::Engine;
-    let outer: serde_json::Value = serde_json::from_str(identity).ok()?;
-    let token = outer.get("Token")?.as_str()?;
-    let claims = token.split('.').nth(1)?;
-    let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .decode(claims)
-        .ok()?;
-    let claims: serde_json::Value = serde_json::from_slice(&decoded).ok()?;
-    base64::engine::general_purpose::STANDARD
-        .decode(claims.get("cpk")?.as_str()?)
-        .ok()
+    /// Checks the identity token against the issuer's published keys.
+    fn verify_identity(&self, identity: &str, now: Instant) -> Result<jwt::Claims, String> {
+        let Some(keys) = &self.identity_keys else {
+            return Err("server has no issuer keys, so no login can be verified".to_owned());
+        };
+        let Some(unix_now) = self.unix_now(now) else {
+            return Err("server has no wall-clock anchor".to_owned());
+        };
+
+        let outer: serde_json::Value =
+            serde_json::from_str(identity).map_err(|_| "identity is not JSON".to_owned())?;
+        let token = outer
+            .get("Token")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| "identity has no Token".to_owned())?;
+
+        let expected = Expected {
+            issuer: TOKEN_ISSUER.to_owned(),
+            audience: TOKEN_AUDIENCE.to_owned(),
+            leeway: 60,
+        };
+        jwt::verify(token, keys, &expected, unix_now).map_err(|e| e.to_string())
+    }
 }
 
 impl Server {
@@ -408,6 +469,71 @@ mod tests {
                 body: vec![1, 2, 3]
             }]
         );
+    }
+
+    fn a_login(identity: &str) -> Vec<u8> {
+        use bedrock_protocol::bytes::Writer;
+        let mut blob = Writer::new();
+        blob.u32(u32::try_from(identity.len()).unwrap_or(0))
+            .bytes(identity.as_bytes())
+            .u32(0);
+        let mut w = Writer::new();
+        w.u32_be(TARGET_PROTOCOL).prefixed(&blob.finish());
+        batch::encode(&[Packet::new(ID_LOGIN, w.finish())])
+    }
+
+    /// The property the whole milestone rests on: a server that cannot verify refuses.
+    /// Falling back to accepting whoever asks, when a key fetch fails, is worse than
+    /// never having checked — it looks authenticated and is not.
+    #[test]
+    fn without_issuer_keys_a_login_is_refused() {
+        let mut server = Server::new("0.0.0.0:19132".parse().unwrap(), 1, "MCPE;x");
+        let peer: SocketAddr = "203.0.113.5:1234".parse().unwrap();
+        assert!(!server.can_verify_identity());
+
+        let payload = a_login(r#"{"Token":"aaa.bbb.ccc"}"#);
+        let events = server.on_payload(peer, &payload, Instant::now());
+
+        assert!(
+            matches!(events.as_slice(), [Event::LoginRejected { .. }]),
+            "{events:?}"
+        );
+    }
+
+    /// A refused login must not leave a cipher behind: the peer never agreed on a key,
+    /// and treating it as encrypted would turn every later packet into a decode failure.
+    #[test]
+    fn a_refused_login_starts_no_encryption() {
+        let mut server = Server::new("0.0.0.0:19132".parse().unwrap(), 1, "MCPE;x");
+        let peer: SocketAddr = "203.0.113.5:1234".parse().unwrap();
+        server.on_payload(peer, &a_login(r#"{"Token":"aaa.bbb.ccc"}"#), Instant::now());
+        assert!(!server.ciphers.contains_key(&peer));
+    }
+
+    #[test]
+    fn a_login_that_is_not_json_is_refused_not_crashed() {
+        let mut server = Server::new("0.0.0.0:19132".parse().unwrap(), 1, "MCPE;x");
+        let peer: SocketAddr = "203.0.113.5:1234".parse().unwrap();
+        for identity in ["", "not json", "{}", r#"{"Token":42}"#] {
+            let events = server.on_payload(peer, &a_login(identity), Instant::now());
+            assert!(
+                matches!(events.as_slice(), [Event::LoginRejected { .. }]),
+                "{identity:?} -> {events:?}"
+            );
+        }
+    }
+
+    /// Keys alone are not enough: without a clock anchor an expiry cannot be judged,
+    /// and judging it against nothing would accept expired tokens forever.
+    #[test]
+    fn keys_and_a_clock_are_both_required() {
+        let server = Server::new("0.0.0.0:19132".parse().unwrap(), 1, "MCPE;x");
+        assert!(!server.can_verify_identity());
+
+        let mut with_keys = Server::new("0.0.0.0:19132".parse().unwrap(), 1, "MCPE;x");
+        let keys = Jwks::parse(r#"{"keys":[]}"#).unwrap();
+        with_keys.set_identity_keys(keys, 1_700_000_000, Instant::now());
+        assert!(with_keys.can_verify_identity());
     }
 
     #[test]
