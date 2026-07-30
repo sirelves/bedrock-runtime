@@ -183,7 +183,7 @@ impl Server {
         }
     }
 
-    /// Supplies the issuer's signing keys, and anchors wall-clock time.
+    /// Supplies the issuer's signing keys.
     ///
     /// Fetching these is I/O and belongs to the caller. Until they arrive no login can
     /// be verified, and an unverifiable login is refused rather than waved through:
@@ -191,6 +191,18 @@ impl Server {
     /// than one that never checked.
     pub fn set_identity_keys(&mut self, keys: Jwks, unix_now: i64, now: Instant) {
         self.identity_keys = Some(keys);
+        self.set_clock(unix_now, now);
+    }
+
+    /// Tells the server what time it is, in seconds since the epoch.
+    ///
+    /// Must be called regularly, not once. An earlier version anchored the wall clock
+    /// at startup and derived the rest from [`Instant`], which does not count time the
+    /// machine spent asleep — a laptop that suspends for ten minutes comes back
+    /// believing it is ten minutes earlier, and starts refusing valid tokens as
+    /// "issued in the future". Observed exactly that: 558 seconds of drift after a
+    /// suspend, against a 60-second leeway.
+    pub fn set_clock(&mut self, unix_now: i64, now: Instant) {
         self.clock = Some((unix_now, now));
     }
 
@@ -568,6 +580,24 @@ mod tests {
                 "{identity:?} -> {events:?}"
             );
         }
+    }
+
+    /// A clock set once and left alone is the bug this replaced: monotonic time does
+    /// not count suspend, so the server's idea of "now" falls behind and valid tokens
+    /// start reading as issued in the future.
+    #[test]
+    fn the_clock_can_be_moved_forward() {
+        let mut server = Server::new("0.0.0.0:19132".parse().unwrap(), 1, "MCPE;x");
+        let at = Instant::now();
+        server.set_identity_keys(Jwks::parse(r#"{"keys":[]}"#).unwrap(), 1_000, at);
+        assert_eq!(server.unix_now(at), Some(1_000));
+
+        server.set_clock(9_999, at);
+        assert_eq!(
+            server.unix_now(at),
+            Some(9_999),
+            "a later reading must win over the old anchor"
+        );
     }
 
     /// Keys alone are not enough: without a clock anchor an expiry cannot be judged,
