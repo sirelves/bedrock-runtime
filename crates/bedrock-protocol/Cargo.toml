@@ -1,0 +1,15 @@
+[package]
+name = "bedrock-protocol"
+description = "Bedrock game packet definitions and codec. Pure, no I/O, no game state."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+bedrock-nbt.workspace = true
+
+[lints]
+workspace = true

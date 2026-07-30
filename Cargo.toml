@@ -1,0 +1,56 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/bedrock-raknet",
+    "crates/bedrock-crypto",
+    "crates/bedrock-nbt",
+    "crates/bedrock-protocol",
+    "crates/bedrock-world",
+    "crates/bedrock-server",
+    "crates/bedrock-cli",
+]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.90"
+license = "MIT"
+repository = "https://github.com/sirelves/bedrock-runtime"
+authors = ["bedrock-runtime contributors"]
+
+# O grafo de dependencias entre crates e normativo — ver docs/ARCHITECTURE.md.
+# Um PR que adicione uma dependencia interna fora do grafo nao e mesclado.
+[workspace.dependencies]
+bedrock-raknet = { path = "crates/bedrock-raknet", version = "0.0.0" }
+bedrock-crypto = { path = "crates/bedrock-crypto", version = "0.0.0" }
+bedrock-nbt = { path = "crates/bedrock-nbt", version = "0.0.0" }
+bedrock-protocol = { path = "crates/bedrock-protocol", version = "0.0.0" }
+bedrock-world = { path = "crates/bedrock-world", version = "0.0.0" }
+bedrock-server = { path = "crates/bedrock-server", version = "0.0.0" }
+
+# Enforced by CI (`cargo clippy --all-targets -- -D warnings`).
+# `unwrap`/`expect` are denied because most of this workspace parses hostile
+# network input — see SECURITY.md. Test modules opt out with
+# `#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]`.
+[workspace.lints.rust]
+unsafe_code = "deny"
+missing_docs = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "allow"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+
+# Perfil para profiling: release com simbolos. Ver docs/PERFORMANCE.md.
+[profile.profiling]
+inherits = "release"
+debug = true
+panic = "unwind"

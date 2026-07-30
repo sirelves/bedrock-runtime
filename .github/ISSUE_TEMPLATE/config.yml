@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Vulnerabilidade de seguranca
+    url: https://github.com/sirelves/bedrock-runtime/security/advisories/new
+    about: Nao abra issue publica. Use reporte privado — ver SECURITY.md.

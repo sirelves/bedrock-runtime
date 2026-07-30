@@ -1,0 +1,24 @@
+name: Achado de protocolo
+description: Comportamento observado do protocolo Bedrock
+labels: [protocol]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Nada entra como verdade sem ter sido observado — ver `docs/PROTOCOL.md`.
+        Documentacao de terceiros e ponto de partida para hipotese, nao prova.
+  - type: textarea
+    attributes:
+      label: O que foi observado
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Evidencia
+      description: Bytes capturados, condicoes da captura, versao do cliente.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Fonte da hipotese, se houver
+      description: Qual referencia de terceiro sugeriu isso, e onde ela diverge do observado.

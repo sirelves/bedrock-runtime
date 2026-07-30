@@ -1,0 +1,17 @@
+/target
+**/*.rs.bk
+Cargo.lock.orig
+
+# artefatos de dados extraídos do cliente/servidor oficial (ver docs/COMPATIBILITY.md)
+/assets/**/*.nbt
+/assets/**/*.bin
+
+# mundos e capturas locais
+/worlds/
+/captures/
+*.mcworld
+
+# notas locais
+plan.md
+
+.DS_Store

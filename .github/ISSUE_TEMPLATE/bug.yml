@@ -1,0 +1,28 @@
+name: Bug
+description: Algo se comporta de forma diferente do documentado
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        O projeto esta em pre-alpha (M0) e a maior parte dele nao esta implementada.
+        Antes de abrir: confira em `docs/ROADMAP.md` se o que voce esperava ja deveria existir.
+  - type: textarea
+    attributes:
+      label: O que aconteceu
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: O que voce esperava, e onde isso esta documentado
+      description: Link para o trecho de docs que descreve o comportamento esperado.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Como reproduzir
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: Versao do servidor (commit) e do cliente Bedrock
