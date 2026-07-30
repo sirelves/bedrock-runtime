@@ -47,10 +47,23 @@ impl fmt::Display for AddressError {
 
 impl std::error::Error for AddressError {}
 
-/// The placeholder RakNet puts in address slots it is not using: `255.255.255.255:0`,
-/// which is seven zero bytes once complemented.
+/// RakNet's own placeholder for an unused address slot: `255.255.255.255:0`, which is
+/// seven zero bytes on the wire.
 pub fn unassigned() -> SocketAddr {
     SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::BROADCAST, 0))
+}
+
+/// Whether an address slot is empty under either convention in use.
+///
+/// RakNet writes `255.255.255.255:0`; a live PocketMine server was observed filling all
+/// twenty slots with `0.0.0.0:0` instead. Both mean the same thing, and a peer that
+/// recognised only one would misread the other as a routable address.
+pub fn is_empty_slot(addr: SocketAddr) -> bool {
+    addr.port() == 0
+        && match addr.ip() {
+            std::net::IpAddr::V4(ip) => ip.is_unspecified() || ip.is_broadcast(),
+            std::net::IpAddr::V6(ip) => ip.is_unspecified(),
+        }
 }
 
 /// Writes an address. An IPv6 input is written as [`unassigned`], since sending a
@@ -124,6 +137,16 @@ mod tests {
         let mut w = Writer::new();
         write(&mut w, unassigned());
         assert_eq!(w.finish(), vec![4, 0, 0, 0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn both_empty_slot_conventions_are_recognised() {
+        for s in ["255.255.255.255:0", "0.0.0.0:0"] {
+            assert!(is_empty_slot(s.parse().unwrap()), "{s}");
+        }
+        for s in ["255.255.255.255:19132", "1.2.3.4:0", "8.8.8.8:53"] {
+            assert!(!is_empty_slot(s.parse().unwrap()), "{s}");
+        }
     }
 
     #[test]
