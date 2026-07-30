@@ -20,6 +20,7 @@ de ideia. Um ADR não é apagado; é substituído por outro que o marca como sup
 | [009](#adr-009--crypto-só-com-primitivas) | `crypto` só com primitivas | Aceita |
 | [010](#adr-010--seções-de-chunk-imutáveis) | Seções de chunk imutáveis | Aceita |
 | [011](#adr-011--sem-io-de-mundo-no-m0) | Sem I/O de mundo no M0 | Aceita |
+| [012](#adr-012--raknet-sans-io) | RakNet sans-io | Aceita |
 
 ---
 
@@ -310,3 +311,44 @@ ser requisito e passam a ser opcionais, sem que isso invalide nenhum ADR:
 
 O que **não** é opcional é o M2: é ele que valida ou derruba
 [ADR-001](#adr-001--core-em-rust), que é a premissa do projeto inteiro.
+
+---
+
+## ADR-012 — RakNet sans-io
+
+**Contexto.** A máquina de estado de uma sessão RakNet precisa de tempo (timeouts,
+retransmissão, keepalive) e de rede (datagramas entrando e saindo). O caminho óbvio é
+ela possuir um socket e um relógio: `Session::run().await`.
+
+Isso custa caro em três frentes. Testar retransmissão passa a exigir dormir de verdade —
+um teste de backoff de 2 segundos leva 2 segundos, e a suíte fica lenta o bastante para
+ninguém rodar. Testar perda e reordenação passa a exigir uma rede falsa ou uma real.
+E o crate passa a arrastar um runtime assíncrono para dentro de uma camada que é, no
+fundo, um autômato sobre bytes.
+
+**Decisão.** `Session` não toca socket e não lê relógio. Datagramas e o instante atual
+entram por parâmetro; datagramas e payloads saem por retorno. Quem tem o socket é a
+camada acima.
+
+```text
+receive(bytes, now) -> payloads
+send(payload, now)
+tick(now)
+poll_transmit() -> Option<datagrama>
+```
+
+**Consequências.**
+- Positiva: backoff, expiração e morte por retry são testados sem dormir. A suíte inteira
+  do crate roda em centésimos de segundo.
+- Positiva: perda, duplicação e reordenação se testam movendo `Vec<u8>` entre duas
+  sessões em memória — sem rede, sem flakiness.
+- Positiva: o crate continua sem dependências. Tokio entra em `bedrock-server`, onde o
+  I/O de fato mora ([ARCHITECTURE.md](ARCHITECTURE.md#modelo-de-concorrência)).
+- **Negativa: a camada acima precisa fazer o loop** — chamar `tick`, drenar
+  `poll_transmit`, decidir quando acordar. Não é ergonômico como um `.await`.
+- Negativa: `now` aparece em quase toda assinatura pública. Verboso, e é o preço direto
+  da testabilidade.
+
+**O que nos faria mudar de ideia.** Se o driver acabar tão complexo que o bug migre para
+ele, a fronteira está no lugar errado. Sinal a observar: `bedrock-server` precisando
+replicar estado que já existe dentro de `Session`.

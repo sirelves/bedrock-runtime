@@ -18,8 +18,18 @@
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+pub mod address;
 pub mod advertisement;
+pub mod connect;
+pub mod datagram;
+pub mod frame;
+pub mod listener;
 pub mod offline;
+pub mod online;
+pub mod order;
+pub mod retransmit;
+pub mod session;
+pub mod split;
 pub mod wire;
 
 /// Default UDP port for Bedrock over IPv4.
@@ -27,6 +37,15 @@ pub const DEFAULT_PORT_V4: u16 = 19132;
 
 /// Default UDP port for Bedrock over IPv6.
 pub const DEFAULT_PORT_V6: u16 = 19133;
+
+/// IPv4 (20) plus UDP (8) header bytes.
+///
+/// RakNet counts these in the MTU it advertises, while a datagram we build does not
+/// include them. Confusing the two makes every full-size packet 28 bytes too big.
+pub const UDP_IP_OVERHEAD: usize = 28;
+
+/// Largest UDP payload RakNet probes with. Bedrock clients start here and walk down.
+pub const MAX_MTU: usize = 1492;
 
 /// The 16-byte constant carried by every offline (pre-connection) RakNet packet.
 pub const MAGIC: [u8; 16] = [

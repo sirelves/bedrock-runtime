@@ -40,7 +40,9 @@ observável — não dá para pular etapas, e é isso que define a ordem do M0.
 
 ## Camada 2 — RakNet
 
-**Estado:** não iniciado. É o item de maior risco do projeto.
+**Estado:** codec completo — fase offline, abertura de conexão, fase conectada,
+fragmentação e retransmissão. Falta a máquina de estado da sessão que junta tudo, e o
+lado servidor.
 
 RakNet é um protocolo de confiabilidade sobre UDP, originalmente uma biblioteca C++ de
 propósito geral para jogos. O Bedrock usa uma variante dele. Não existe implementação
@@ -57,28 +59,95 @@ madura em Rust — este é código próprio.
   aparecer, sem erro.
 - `OpenConnectionRequest1/2` e `OpenConnectionReply1/2` — negociação de MTU. O cliente
   sonda com pacotes de tamanhos decrescentes; o MTU acordado limita o tamanho do
-  fragmento daí em diante.
+  fragmento daí em diante. **Implementado e confirmado** — ver os três achados abaixo.
 - Todos os pacotes offline carregam a constante `MAGIC` de 16 bytes
   (`00 ff ff 00 fe fe fe fe fd fd fd fd 12 34 56 78`).
 
-**Fase conectada** (o trabalho real):
-- *Datagrama* com número de sequência próprio, carregando um ou mais *frames*.
+**Fase conectada:**
+- *Datagrama* com número de sequência próprio, carregando um ou mais *frames*. ✅
 - Confiabilidades: unreliable, unreliable sequenced, reliable, reliable ordered,
   reliable sequenced (e as variantes com ACK receipt). O jogo usa principalmente
-  **reliable ordered no canal 0**.
-- Fragmentação: payload maior que o MTU vira N fragmentos com `split_id`, `split_index`
-  e `split_count`; a remontagem é responsabilidade do receptor.
-- ACK / NACK com ranges de sequência, retransmissão por RTO estimado a partir do RTT.
-- `ConnectedPing` / `ConnectedPong` para keepalive e medição de RTT.
-- `Disconnect`.
+  **reliable ordered no canal 0**. ✅
+- ACK / NACK com ranges de sequência. ✅
+- `ConnectedPing` / `ConnectedPong`, `ConnectionRequest`, `ConnectionRequestAccepted`,
+  `NewIncomingConnection`, `Disconnect`. ✅
+- Fragmentação e remontagem com `split_id`/`split_index`/`split_count`, com limites por
+  sessão e expiração. ✅
+- Retransmissão por RTO estimado do RTT (RFC 6298, com Karn). ✅
+- Máquina de estado da sessão e o socket que junta tudo. **Falta.**
+
+### Confirmado contra tráfego real (2026-07-30)
+
+Fixtures em `crates/bedrock-raknet/tests/fixtures/`, obtidos com
+`cargo run -p bedrock-raknet --example connect`.
+
+**O MTU anunciado inclui os cabeçalhos IP e UDP.** Sondando um servidor com
+1492/1400/1200/576 bytes de payload, as respostas foram 1520/1428/1228/604 — exatamente
+28 bytes a mais em todos os degraus (20 de IPv4 + 8 de UDP). Tratar o número anunciado
+como tamanho de payload coloca todo datagrama cheio 28 bytes acima do limite: funciona
+em loopback e fragmenta ou some numa rede real. `payload_limit()` modela isso.
+
+**Os octetos IPv4 vão complementados.** Confirmado por ground truth, não por consenso
+entre implementações: o endereço que o servidor reportou para nós só bate com o IP
+público real sob a leitura complementada. A armadilha é que a leitura errada produz um
+endereço plausível — as duas são complemento uma da outra.
+
+**Existe um cookie de anti-amplificação.** Quando o servidor liga o flag de segurança no
+`Reply1`, ele envia um cookie de 4 bytes que o cliente precisa devolver no `Request2`.
+Um endereço de origem forjado nunca recebe o cookie, então não passa do request 1. Ler o
+flag errado desloca o campo de MTU em vez de falhar o decode — erro silencioso.
+
+**A versão do protocolo RakNet é 11**, e `IncompatibleProtocolVersion` (0x19) devolve a
+versão que o servidor fala. Não há motivo para adivinhar: pergunte.
+
+**A escada de MTU é necessária.** Numa execução o degrau de 1492 não teve resposta e o
+de 1200 passou; noutra, contra o mesmo servidor, 1492 respondeu. Não é precaução
+teórica — o caminho muda.
+
+### Fase conectada — confirmada
+
+Uma conexão RakNet completa foi estabelecida contra um servidor real:
+`ConnectionRequest` → `ConnectionRequestAccepted` → `NewIncomingConnection` →
+`ConnectedPing`/`ConnectedPong` → `Disconnect`. Isso exercita, contra uma implementação
+de verdade, o cabeçalho de datagrama, o número de sequência u24 little-endian, o
+comprimento de frame **em bits**, os índices de confiabilidade e ordenação, e a nossa
+codificação de ACK.
+
+**O comprimento do frame é em bits, não bytes.** Lido como bytes, o payload sai com um
+oitavo do tamanho e todo frame seguinte no datagrama lê do offset errado — vira lixo, não
+erro de decode.
+
+**Os slots de endereço não usam o placeholder do RakNet.** O `ConnectionRequestAccepted`
+traz 20 slots, e este servidor preenche todos com `0.0.0.0:0` — não com o
+`255.255.255.255:0` que o RakNet usa como não-atribuído. As duas convenções significam a
+mesma coisa; quem conhecer só uma lê a outra como endereço roteável.
+
+**A quantidade de slots não está no fio.** O RakNet compila 10, servidores Bedrock mandam
+20. Decodificar lendo slots até sobrarem só os dois timestamps finais evita a adivinhação,
+e a resposta espelha a contagem recebida.
+
+**Ranges de ACK ficam ranges.** Um único record pode reivindicar 16 milhões de números de
+sequência; expandir isso numa lista é negação de serviço com um pacote. Pelo mesmo motivo,
+limpar os datagramas confirmados percorre o que temos em mãos, não o intervalo anunciado.
+
+**A remontagem é onde o peer escolhe o tamanho da nossa alocação.** Cada limite existe
+por um ataque específico: contagem absurda de fragmentos, um split id aberto por vez sem
+nunca fechar, fragmentos que nunca completam um payload, e o peer que simplesmente para
+de falar. Os fragmentos ficam num mapa indexado, não num vetor dimensionado pela contagem
+anunciada.
 
 ### Riscos concretos
 
 - **Remontagem de fragmentos é superfície de ataque.** Um cliente pode anunciar
   `split_count` enorme e nunca enviar os fragmentos. Limite de memória por sessão e
   timeout de remontagem são requisito, não otimização.
-- **Retransmissão mal calibrada mata o desempenho antes do jogo existir.** RTO fixo é
-  aceitável para fechar o M0; RTO adaptativo entra no M2, com os números na mão.
+- **Retransmissão mal calibrada mata o desempenho antes do jogo existir.** Uma versão
+  anterior deste documento dizia que RTO fixo bastava para o M0 e que o adaptativo
+  esperaria o M2. Estava errado: RTO fixo é maior ou menor que o link, e os dois casos
+  doem — longo demais trava segundos após uma única perda, curto demais inunda um
+  caminho lento de duplicatas e piora o congestionamento a que está reagindo. O
+  estimador do RFC 6298 são vinte linhas de um padrão de trinta anos, não uma
+  otimização. Implementado, com o algoritmo de Karn.
 - **A ordem de janela de ordenação é por canal.** Misturar canais é fonte comum de
   travamento silencioso.
 
@@ -87,6 +156,9 @@ madura em Rust — este é código próprio.
 Um cliente Bedrock real vê o servidor na lista de mundos e completa a abertura de
 conexão até `ConnectionRequestAccepted`. Testes de fragmentação com payloads de 1 KB,
 64 KB e 1 MB fazem round-trip.
+
+Metade disso está feita pelo lado errado: nós **somos** o cliente que completa o
+handshake. Falta o servidor — e um cliente Bedrock real para exercitá-lo.
 
 ---
 

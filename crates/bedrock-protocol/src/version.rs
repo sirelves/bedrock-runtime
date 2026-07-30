@@ -15,19 +15,25 @@
 //! proxies. That is precisely why one source was never going to be enough: the
 //! corroboration is what carries the weight here, not any single number.
 //!
-//! # How confident this is
+//! # Confirmed
 //!
-//! Corroborated, **not** authoritative. A third-party server advertises whatever its
-//! operator configured; agreement between two of them is strong evidence about what
-//! current clients speak, not proof. Two things would upgrade it, and both are cheap
-//! once they are possible:
+//! An up-to-date Minecraft client connected to our server on 2026-07-30 and declared
+//! `1001` in `RequestNetworkSettings` — in the clear, before any encryption, as the
+//! first thing it sent after the RakNet handshake. That is ground truth from the thing
+//! we are actually serving, not inference from what other servers advertise.
 //!
-//! - probing an official Bedrock Dedicated Server we run ourselves, which advertises
-//!   what Mojang shipped;
-//! - completing a real login (M0.3) — a wrong protocol version fails there loudly.
+//! The capture is `tests/fixtures/request-network-settings-1001.bin`, and a test
+//! asserts the constant below still matches it. If the target moves, that test fails
+//! for a few cents instead of costing a day of debugging cryptography that was never
+//! broken.
 //!
-//! Until one of those happens, a mismatch against a real client is evidence against
-//! *these constants* first, and against the code reading them second.
+//! Three earlier sources agreed on the same number — two unrelated public servers and
+//! the Minecraft Wiki, which lists 1001 as the protocol of release 26.35. Agreement is
+//! reassuring; the client is what settles it.
+//!
+//! [`MINECRAFT_VERSION`] is display-only and less certain: the public servers advertised
+//! `1.26.30` while the wiki calls the release `26.35`. The client compares the number,
+//! not the name, so nothing depends on resolving it.
 
 /// Numeric protocol version, sent in `Login` and in the offline pong.
 ///
