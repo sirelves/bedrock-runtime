@@ -247,6 +247,16 @@ impl Session {
             .payload_limit
             .saturating_sub(DATAGRAM_HEADER_LEN);
 
+        // Reserve before queuing anything. A payload that ran out of window halfway
+        // would leave the peer reassembling fragments whose rest is never coming, so
+        // the whole payload has to fit or none of it goes.
+        let needed = Self::datagrams_needed(&frames, budget);
+        if self.outbox.len() + needed > self.config.max_outbox
+            || self.retransmitter.in_flight() + needed > self.config.retransmit.max_in_flight
+        {
+            return Err(SessionError::OutboxFull);
+        }
+
         let mut batch: Vec<Frame> = Vec::new();
         let mut used = 0usize;
 
@@ -274,11 +284,22 @@ impl Session {
         Ok(())
     }
 
-    fn flush_batch(&mut self, frames: Vec<Frame>, now: Instant) -> Result<(), SessionError> {
-        if self.outbox.len() >= self.config.max_outbox {
-            return Err(SessionError::OutboxFull);
+    /// Datagrams `frames` will occupy once packed, so capacity can be reserved.
+    fn datagrams_needed(frames: &[Frame], budget: usize) -> usize {
+        let mut count = 0;
+        let mut used = 0usize;
+        for frame in frames {
+            let size = frame.encoded_len();
+            if used == 0 || used + size > budget {
+                count += 1;
+                used = 0;
+            }
+            used += size;
         }
+        count
+    }
 
+    fn flush_batch(&mut self, frames: Vec<Frame>, now: Instant) -> Result<(), SessionError> {
         let sequence = self.next_sequence;
         self.next_sequence = self.next_sequence.wrapping_add(1);
 
