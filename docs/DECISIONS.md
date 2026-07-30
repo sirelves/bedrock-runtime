@@ -469,6 +469,19 @@ Documentação campo a campo do fabricante não é adivinhação.
 **Decisão.** O M0.4 sai. `StartGame` é implementado a partir dos schemas oficiais, e a
 verificação continua sendo a mesma de sempre: um cliente real conectando.
 
+**Correção do alcance desta decisão.** O ADR afirmava que os schemas publicados
+substituem a captura. Isso vale para os pacotes simples — `NetworkSettings`,
+`PlayStatus`, `Login`, negociação de pacotes, todos bateram de primeira — mas **não vale
+para o `StartGame`**. Os schemas publicados descrevem o protocolo 2169, e o changelog do
+2168 lista o `StartGamePacket` entre os pacotes "converted to Cereal-only serialization",
+ao lado de outros com mudança de fio explícita. Nosso alvo é 1001, anterior a isso.
+
+O `StartGame` acabou sendo lido de uma implementação de referência fixada em 1001, e ela
+discorda do schema 2169 em pontos que teriam falhado em silêncio: existe um booleano
+`is_logging_chat` que o schema não lista, e o `serverJoinInformation` é opcional em vez de
+campo fixo. O método continua o mesmo — referência de terceiro é hipótese, cliente real é
+prova — só que a fonte da hipótese mudou.
+
 **Consequências.**
 - Positiva: um milestone inteiro a menos, e ele era grande.
 - Positiva: a impossibilidade do MITM é um resultado de segurança do projeto, não só um
