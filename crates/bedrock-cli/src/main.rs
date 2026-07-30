@@ -95,6 +95,10 @@ fn report(event: &Event, options: &Options, captured: &mut usize) -> Result<(), 
             println!("HANDSHAKE ACEITO  {peer}");
             println!("  decifrado com sucesso: a derivacao, o IV e o checksum estao certos");
         }
+        Event::PlayStatusSent { peer, status } => {
+            println!("  -> PlayStatus {status:?}  (cifrado)");
+            let _ = peer;
+        }
         Event::Decrypted { peer, id, len } => {
             println!("cifrado ok    {peer}  packet {id}, {len} bytes decifrados");
         }

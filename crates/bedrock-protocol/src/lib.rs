@@ -23,4 +23,5 @@ pub mod batch;
 pub mod bytes;
 pub mod handshake;
 pub mod login;
+pub mod play_status;
 pub mod version;
