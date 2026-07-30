@@ -17,6 +17,9 @@ use crate::frame::{Frame, FrameError};
 use crate::wire::{DecodeError, Reader, Writer};
 use std::fmt;
 
+/// Flags byte plus the u24 sequence number.
+pub const DATAGRAM_HEADER_LEN: usize = 4;
+
 const FLAG_VALID: u8 = 0x80;
 const FLAG_ACK: u8 = 0x40;
 const FLAG_NACK: u8 = 0x20;

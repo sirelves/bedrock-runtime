@@ -25,6 +25,7 @@ pub mod datagram;
 pub mod frame;
 pub mod offline;
 pub mod online;
+pub mod split;
 pub mod wire;
 
 /// Default UDP port for Bedrock over IPv4.
