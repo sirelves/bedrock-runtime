@@ -1,7 +1,7 @@
 //! The encrypted packet stream.
 //!
-//! AES-256 in CFB8, one continuous cipher state per direction, with an 8-byte checksum
-//! appended to each packet before encryption:
+//! AES-256-GCM used as a stream cipher, one continuous keystream per direction, with an
+//! 8-byte checksum appended to each packet before encryption:
 //!
 //! ```text
 //! plaintext || SHA-256(counter_le || plaintext || key)[..8]
@@ -12,28 +12,32 @@
 //! the stream permanently. That is fine here: the transport underneath already
 //! guarantees reliable ordered delivery.
 //!
-//! # Why CFB8 and not GCM
+//! # GCM without the tag
 //!
-//! Measured, not chosen. A real client answered our handshake with twelve bytes: the
-//! batch marker and eleven more. An empty `ClientToServerHandshake` is three bytes of
-//! plaintext plus the eight-byte checksum — eleven. A length-preserving mode produces
-//! exactly that; GCM would have added a sixteen-byte tag.
+//! The authentication tag is never computed and never sent. What travels is the raw
+//! keystream output, which makes this length-preserving: three bytes of plaintext plus
+//! eight of checksum go out as eleven. Integrity comes from that checksum instead.
 //!
-//! # Still unconfirmed
+//! Because the tag is absent, the construction is exactly CTR with GCM's counter
+//! layout: the nonce is the key's first twelve bytes, and the first keystream block
+//! uses `nonce || 00 00 00 02`, since GCM reserves `J0 = nonce || 00 00 00 01` for the
+//! tag it is not producing here.
 //!
-//! That the IV is the key's first sixteen bytes, and that the checksum is built in this
-//! order. Both fail the same way — the checksum mismatches — and the first packet that
-//! decrypts cleanly settles them.
+//! Reading the eleven bytes as ruling GCM out — a tag would have made them longer — is
+//! what sent an earlier version of this file to CFB8. The tag being absent is precisely
+//! why the lengths matched either way.
 
 use crate::agreement::SessionKey;
 use aes::Aes256;
-use aes::cipher::{Block, BlockDecryptMut, BlockEncryptMut, KeyIvInit};
+use aes::cipher::{KeyIvInit, StreamCipher};
 use ring::digest;
 use std::fmt;
 use subtle::ConstantTimeEq;
 
-type Encryptor = cfb8::Encryptor<Aes256>;
-type Decryptor = cfb8::Decryptor<Aes256>;
+type Keystream = ctr::Ctr32BE<Aes256>;
+
+/// Bytes of the key used as the GCM nonce.
+const NONCE_LEN: usize = 12;
 
 /// Bytes of checksum appended to every packet.
 pub const CHECKSUM_LEN: usize = 8;
@@ -61,8 +65,8 @@ impl std::error::Error for CipherError {}
 
 /// One session's encrypted stream, both directions.
 pub struct Cipher {
-    encryptor: Encryptor,
-    decryptor: Decryptor,
+    outbound: Keystream,
+    inbound: Keystream,
     key: [u8; 32],
     sent: u64,
     received: u64,
@@ -81,16 +85,18 @@ impl fmt::Debug for Cipher {
 impl Cipher {
     /// Starts a stream from an agreed session key.
     ///
-    /// The IV is the key's first sixteen bytes: there is no separate IV on the wire,
-    /// and both sides have to arrive at the same one from the same material.
+    /// Nothing about the nonce is sent: both sides derive it from the key, so both have
+    /// to build it the same way from the same material.
     pub fn new(key: &SessionKey) -> Self {
         let key = *key.as_bytes();
+
         let mut iv = [0u8; 16];
-        iv.copy_from_slice(&key[..16]);
+        iv[..NONCE_LEN].copy_from_slice(&key[..NONCE_LEN]);
+        iv[NONCE_LEN..].copy_from_slice(&2u32.to_be_bytes());
 
         Self {
-            encryptor: Encryptor::new(&key.into(), &iv.into()),
-            decryptor: Decryptor::new(&key.into(), &iv.into()),
+            outbound: Keystream::new(&key.into(), &iv.into()),
+            inbound: Keystream::new(&key.into(), &iv.into()),
             key,
             sent: 0,
             received: 0,
@@ -117,13 +123,9 @@ impl Cipher {
         buf.extend_from_slice(plaintext);
         buf.extend_from_slice(&checksum);
 
-        // CFB8 has a one-byte block, so this walks the buffer while keeping the shift
-        // register across packets — which is what makes it one stream and not many.
-        for byte in &mut buf {
-            let mut block = Block::<Encryptor>::from([*byte]);
-            self.encryptor.encrypt_block_mut(&mut block);
-            *byte = block[0];
-        }
+        // One keystream for the whole session, not one per packet: the counter carries
+        // over, which is what makes this a stream rather than many short ones.
+        self.outbound.apply_keystream(&mut buf);
         buf
     }
 
@@ -134,11 +136,7 @@ impl Cipher {
         }
 
         let mut buf = ciphertext.to_vec();
-        for byte in &mut buf {
-            let mut block = Block::<Decryptor>::from([*byte]);
-            self.decryptor.decrypt_block_mut(&mut block);
-            *byte = block[0];
-        }
+        self.inbound.apply_keystream(&mut buf);
 
         let split = buf.len() - CHECKSUM_LEN;
         let expected = self.checksum(self.received, &buf[..split]);
@@ -188,7 +186,7 @@ mod tests {
         assert_eq!(b.decrypt(&encrypted).unwrap(), plaintext);
     }
 
-    /// The arithmetic that identified the mode: three bytes in, eleven out.
+    /// The length a real client sent. It matches because GCM's tag is never produced.
     #[test]
     fn the_length_matches_what_the_client_sent() {
         let (mut a, _) = pair();
