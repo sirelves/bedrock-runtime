@@ -173,6 +173,9 @@ fn report(event: &Event, options: &Options, captured: &mut usize) -> Result<(), 
         } => {
             println!("  -> ChunkRadiusUpdated  {peer}  pediu {requested}, concedido {granted}");
         }
+        Event::Spawned { peer, columns } => {
+            println!("  -> {columns} colunas + PlayStatus PlayerSpawn  {peer}");
+        }
         Event::Decrypted { peer, id, len } => {
             println!("cifrado ok    {peer}  packet {id}, {len} bytes decifrados");
         }
