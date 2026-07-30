@@ -198,6 +198,11 @@ forma.
 | [wiki.vg](https://wiki.vg/) | Contexto geral | Cobertura de Bedrock é parcial e envelhece |
 | Captura própria (proxy MITM entre cliente e servidor oficial) | **A única fonte que prova** | Requer chaves de sessão; montar cedo no M0 |
 
-**Ferramenta prioritária:** um proxy de captura que fique entre um cliente real e o
-servidor oficial, com as chaves de sessão em mãos, gerando fixtures automaticamente.
-Construir isso na primeira semana do M0 economiza o resto do milestone.
+**Ferramenta prioritária, mas não a primeira.** Um proxy de captura entre um cliente
+real e o servidor oficial, gerando fixtures automaticamente, é o que torna a Camada 5
+viável — `StartGame` é grande demais para ser adivinhado. Só que ele fala RakNet dos dois
+lados e termina a criptografia nas duas pontas, então depende das camadas 2 e 3: é o
+[M0.4](ROADMAP.md#m04--proxy-de-captura), não o começo.
+
+O que dá para fazer antes de qualquer coisa é a fase offline, que viaja em claro. Foi
+assim que a versão-alvo foi confirmada — ver [COMPATIBILITY.md](COMPATIBILITY.md#versão-alvo).

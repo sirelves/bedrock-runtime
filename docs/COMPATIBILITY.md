@@ -50,7 +50,7 @@ Preenchido a cada atualização de versão-alvo.
 
 Quando a Mojang lança uma versão nova:
 
-1. Capturar um login com o cliente novo usando a ferramenta do M0.1.
+1. Capturar um login com o cliente novo usando o proxy do [M0.4](ROADMAP.md#m04--proxy-de-captura).
 2. Fazer o diff dos fixtures contra a versão anterior — é isso que revela o que mudou.
 3. Extrair novamente os artefatos de dados (paleta de blocos, definições de bioma,
    identificadores de entidade).

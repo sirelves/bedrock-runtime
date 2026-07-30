@@ -192,7 +192,7 @@ de comportamento do protocolo ([PROTOCOL.md](PROTOCOL.md#referências)), nunca c
 - **Negativa: significativamente mais lento até o primeiro cliente conectar.** É o preço
   do M0 ser grande.
 - Negativa: erros que aqueles projetos já resolveram serão redescobertos.
-- Mitigação: fixtures capturados de tráfego real ([M0.1](ROADMAP.md#m01--ferramenta-de-captura))
+- Mitigação: fixtures capturados de tráfego real ([M0.4](ROADMAP.md#m04--proxy-de-captura))
   substituem a leitura de código alheio como fonte de verdade.
 
 ---
