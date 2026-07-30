@@ -164,7 +164,8 @@ handshake. Falta o servidor — e um cliente Bedrock real para exercitá-lo.
 
 ## Camada 3 — Criptografia e autenticação
 
-**Estado:** não iniciado. Segundo maior risco.
+**Estado:** completa e confirmada contra um cliente real. Um cliente Bedrock não
+modificado completa o login e avança para a sequência pós-login.
 
 O fluxo, na ordem em que acontece:
 

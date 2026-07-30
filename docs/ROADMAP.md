@@ -61,11 +61,22 @@ próprio critério.
 - O cliente trava em "Conectando ao servidor externo" porque ninguém responde o login.
   É onde o M0.2 termina de propósito.
 
-### M0.3 — Handshake e criptografia
-- `NetworkSettings`, validação da cadeia JWT, ECDH, derivação de chave, cifra do stream,
-  compressão de batch.
-- **Fecha quando:** `ClientToServerHandshake` chega, descriptografa e valida; um
-  `PlayStatus` de login aceito chega ao cliente.
+### M0.3 — Handshake e criptografia ✅
+- `NetworkSettings`, decodificação do `Login`, verificação do token de identidade, ECDH
+  P-384, derivação de chave e cifra do stream.
+- **Fechou quando:** em 2026-07-30 um cliente Bedrock real completou o handshake, teve
+  seu `ClientToServerHandshake` decifrado e validado, decifrou nosso `PlayStatus` de
+  login aceito e seguiu para o `ClientCacheStatus` — o primeiro pacote da sequência
+  pós-login.
+- **Dívida em aberto:** a verificação do token está implementada e testada contra as
+  chaves reais da Microsoft, mas o servidor ainda não busca o JWKS por HTTP, então o
+  caminho de produção aceita a identidade declarada sem verificar. Ver M0.3b.
+
+### M0.3b — Autenticação online ligada
+- Buscar o JWKS do emissor por HTTP, com cache e rotação de chave, e chamar a
+  verificação no caminho do servidor.
+- **Fecha quando:** um login com token inválido ou expirado é recusado com
+  `PlayStatus` em vez de aceito.
 
 ### M0.4 — Proxy de captura
 - Proxy MITM entre um cliente real e um servidor oficial, com dump dos pacotes já
