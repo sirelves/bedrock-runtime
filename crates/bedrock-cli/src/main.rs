@@ -80,6 +80,9 @@ fn report(event: &Event, options: &Options, captured: &mut usize) -> Result<(), 
             println!("  head  {}", head(body));
             save(options, captured, &format!("packet-{id}"), body)?;
         }
+        Event::Compressed { peer, method } => {
+            println!("compressed    {peer}  batch declares {method:?}, which we cannot read yet");
+        }
         Event::Undecodable(peer, payload) => {
             println!("undecodable   {peer}  {} bytes", payload.len());
             println!("  head  {}", head(payload));

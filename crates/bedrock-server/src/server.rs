@@ -13,6 +13,7 @@ use bedrock_protocol::handshake::{
 };
 use bedrock_protocol::version::{MINECRAFT_VERSION, PROTOCOL_VERSION};
 use bedrock_raknet::listener::{Event as RakEvent, Listener, ListenerConfig};
+use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
@@ -44,6 +45,13 @@ pub enum Event {
         /// Its body.
         body: Vec<u8>,
     },
+    /// A batch arrived compressed with a method we cannot read yet.
+    Compressed {
+        /// Who sent it.
+        peer: SocketAddr,
+        /// Which method the batch declared.
+        method: batch::Method,
+    },
     /// A payload that did not decode as a batch.
     Undecodable(SocketAddr, Vec<u8>),
     /// A peer went away.
@@ -67,6 +75,10 @@ pub fn advertisement(
 #[derive(Debug)]
 pub struct Server {
     listener: Listener,
+    /// Peers already told which compression to use. The batch framing gains a method
+    /// byte from that point on, so the same bytes decode two different ways depending
+    /// on which side of this the peer is.
+    settled: HashSet<SocketAddr>,
 }
 
 impl Server {
@@ -84,6 +96,7 @@ impl Server {
     ) -> Self {
         Self {
             listener: Listener::new(local, guid, advertisement, config),
+            settled: HashSet::new(),
         }
     }
 
@@ -115,7 +128,10 @@ impl Server {
         for event in self.listener.receive(from, bytes, now) {
             match event {
                 RakEvent::Connected(peer) => events.push(Event::Connected(peer)),
-                RakEvent::Disconnected(peer) => events.push(Event::Disconnected(peer)),
+                RakEvent::Disconnected(peer) => {
+                    self.settled.remove(&peer);
+                    events.push(Event::Disconnected(peer));
+                }
                 RakEvent::Payload(peer, payload) => {
                     events.extend(self.on_payload(peer, &payload, now));
                 }
@@ -125,8 +141,17 @@ impl Server {
     }
 
     fn on_payload(&mut self, peer: SocketAddr, payload: &[u8], now: Instant) -> Vec<Event> {
-        let Ok(packets) = batch::decode(payload) else {
-            return vec![Event::Undecodable(peer, payload.to_vec())];
+        let packets = if self.settled.contains(&peer) {
+            match batch::decode_with_method(payload) {
+                Ok((batch::Method::None, packets)) => packets,
+                Ok((method, _)) => return vec![Event::Compressed { peer, method }],
+                Err(_) => return vec![Event::Undecodable(peer, payload.to_vec())],
+            }
+        } else {
+            match batch::decode(payload) {
+                Ok(packets) => packets,
+                Err(_) => return vec![Event::Undecodable(peer, payload.to_vec())],
+            }
         };
 
         let mut events = Vec::new();
@@ -139,8 +164,11 @@ impl Server {
                 // Uncompressed on purpose: it makes the login that follows readable as
                 // plain bytes. Negotiating a real algorithm waits until there is a
                 // capture to check it against.
+                // This reply still goes out without a method byte; the byte appears
+                // from the next batch onwards, in both directions.
                 let reply = batch::encode(&[NetworkSettings::uncompressed().packet()]);
                 let _ = self.listener.send(peer, reply, now);
+                self.settled.insert(peer);
 
                 events.push(Event::NetworkSettingsRequested {
                     peer,
