@@ -84,6 +84,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     loop {
         let now = Instant::now();
 
+        // Re-read the wall clock every pass. Deriving it from a monotonic instant
+        // drifts across suspend, and the symptom is refusing perfectly good logins.
+        server.set_clock(unix_now(), now);
+
         if now.duration_since(last_refresh) >= KEY_REFRESH {
             last_refresh = now;
             match fetch_identity_keys() {
