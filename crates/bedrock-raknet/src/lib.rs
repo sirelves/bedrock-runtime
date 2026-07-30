@@ -18,6 +18,7 @@
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+pub mod offline;
 pub mod wire;
 
 /// Default UDP port for Bedrock over IPv4.
