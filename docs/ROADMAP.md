@@ -50,10 +50,14 @@ próprio critério.
   independentes — e a descoberta de que servidores grandes anunciam número de fachada,
   o que tornou "uma fonte só" insuficiente por evidência, não por precaução.
 
-### M0.2 — RakNet
+### M0.2 — RakNet ✅
 - Abertura de conexão, MTU, confiabilidade, ordenação, fragmentação, ACK/NACK, keepalive.
-- **Fecha quando:** o servidor aparece na lista de mundos do cliente e a conexão chega
-  a `ConnectionRequestAccepted`; testes de fragmentação com 1 KB / 64 KB / 1 MB passam.
+- **Fechou quando:** em 2026-07-30 um cliente Bedrock não modificado encontrou o servidor
+  na lista, completou o handshake até `ConnectionRequestAccepted` e enviou o primeiro
+  pacote de jogo. Os testes de fragmentação passam com 1 KiB / 64 KiB / 1 MiB, e um
+  megabyte atravessa um link simulado com 12% de perda e 25% de reordenação intacto.
+- O cliente trava em "Conectando ao servidor externo" porque ninguém responde o login.
+  É onde o M0.2 termina de propósito.
 
 ### M0.3 — Handshake e criptografia
 - `NetworkSettings`, validação da cadeia JWT, ECDH, derivação de chave, cifra do stream,

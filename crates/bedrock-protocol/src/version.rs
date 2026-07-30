@@ -17,17 +17,19 @@
 //!
 //! # How confident this is
 //!
-//! Corroborated, **not** authoritative. A third-party server advertises whatever its
-//! operator configured; agreement between two of them is strong evidence about what
-//! current clients speak, not proof. Two things would upgrade it, and both are cheap
-//! once they are possible:
+//! Corroborated by three independent sources now: two unrelated public servers, and
+//! the Minecraft Wiki, which lists 1001 as the protocol of release 26.35 — the current
+//! stable version. Still not ground truth from a client.
 //!
-//! - probing an official Bedrock Dedicated Server we run ourselves, which advertises
-//!   what Mojang shipped;
-//! - completing a real login (M0.3) — a wrong protocol version fails there loudly.
+//! Ground truth turns out to be cheap, and we know exactly how to get it. A client
+//! states its protocol version in `RequestNetworkSettings`, **in the clear, before any
+//! encryption**, as the first thing it sends after the RakNet handshake. A capture on
+//! 2026-07-30 read 975 out of a real client — that client was on release 26.23, a few
+//! versions behind, which is why the number differed rather than 1001 being wrong.
 //!
-//! Until one of those happens, a mismatch against a real client is evidence against
-//! *these constants* first, and against the code reading them second.
+//! See `crates/bedrock-protocol/tests/first_contact.rs`. Point a client on 26.35 at the
+//! server and the constant below is confirmed or corrected in one connection, without a
+//! line of crypto.
 
 /// Numeric protocol version, sent in `Login` and in the offline pong.
 ///

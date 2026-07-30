@@ -43,6 +43,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("advertising  {advertisement}");
     println!("ctrl-c to stop\n");
 
+    let dump = std::env::var("BEDROCK_DUMP").ok();
+    let mut seen = 0usize;
     let mut buf = [0u8; 2048];
     loop {
         let now = Instant::now();
@@ -52,11 +54,19 @@ fn main() -> Result<(), Box<dyn Error>> {
                 match event {
                     Event::Connected(peer) => println!("connected     {peer}"),
                     Event::Disconnected(peer) => println!("disconnected  {peer}"),
-                    Event::Payload(peer, payload) => println!(
-                        "payload       {peer}  {} bytes, first byte {:#04x}",
-                        payload.len(),
-                        payload.first().copied().unwrap_or(0)
-                    ),
+                    Event::Payload(peer, payload) => {
+                        println!("payload       {peer}  {} bytes", payload.len());
+                        println!("  hex   {}", hex(&payload));
+                        println!("  ascii {}", ascii(&payload));
+                        let name = format!("payload-{:04}.bin", seen);
+                        seen += 1;
+                        if let Some(dir) = &dump {
+                            let path = std::path::Path::new(dir).join(&name);
+                            std::fs::create_dir_all(dir)?;
+                            std::fs::write(&path, &payload)?;
+                            println!("  saved {}", path.display());
+                        }
+                    }
                 }
             }
         }
@@ -71,4 +81,19 @@ fn main() -> Result<(), Box<dyn Error>> {
             socket.send_to(&datagram, to)?;
         }
     }
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn ascii(bytes: &[u8]) -> String {
+    bytes
+        .iter()
+        .map(|&b| if b.is_ascii_graphic() { b as char } else { '.' })
+        .collect()
 }

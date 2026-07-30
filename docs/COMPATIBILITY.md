@@ -33,10 +33,18 @@ contadores como `20001/100001` jogadores. Um servidor de terceiro anuncia o que 
 operador configurou. O que dá peso ao `1001` é a concordância entre dois independentes,
 não o número em si.
 
-Duas coisas promovem isso de corroborado para confirmado, e ambas são baratas quando
-possíveis: sondar um Bedrock Dedicated Server oficial rodando localmente, ou completar
-um login real ([M0.3](ROADMAP.md#m03--handshake-e-criptografia)) — protocolo errado
-falha ali de forma barulhenta.
+**Terceira fonte:** a Minecraft Wiki lista `1001` como o protocolo da release `26.35`,
+a estável atual. Três fontes independentes concordando, e ainda assim nenhuma delas é um
+cliente.
+
+**Como confirmar de verdade, e é barato.** O cliente declara a versão que fala no
+`RequestNetworkSettings` — um `int32` em claro, **antes de qualquer criptografia**,
+logo depois do handshake RakNet. Basta apontar um cliente para o servidor e ler os oito
+bytes. Feito em 2026-07-30 com um cliente na release 26.23: leu `975`, que é o protocolo
+daquela release. O número diferiu porque o cliente estava desatualizado, não porque o
+`1001` estivesse errado.
+
+Fixture e decodificação em `crates/bedrock-protocol/tests/first_contact.rs`.
 
 ## Histórico de versões suportadas
 
