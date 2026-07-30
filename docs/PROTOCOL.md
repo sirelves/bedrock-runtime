@@ -40,7 +40,9 @@ observável — não dá para pular etapas, e é isso que define a ordem do M0.
 
 ## Camada 2 — RakNet
 
-**Estado:** não iniciado. É o item de maior risco do projeto.
+**Estado:** fase offline, abertura de conexão e fase conectada implementadas e
+confirmadas contra um servidor real. Faltam fragmentação/remontagem, retransmissão e a
+máquina de estado da sessão.
 
 RakNet é um protocolo de confiabilidade sobre UDP, originalmente uma biblioteca C++ de
 propósito geral para jogos. O Bedrock usa uma variante dele. Não existe implementação
@@ -60,6 +62,18 @@ madura em Rust — este é código próprio.
   fragmento daí em diante. **Implementado e confirmado** — ver os três achados abaixo.
 - Todos os pacotes offline carregam a constante `MAGIC` de 16 bytes
   (`00 ff ff 00 fe fe fe fe fd fd fd fd 12 34 56 78`).
+
+**Fase conectada:**
+- *Datagrama* com número de sequência próprio, carregando um ou mais *frames*. ✅
+- Confiabilidades: unreliable, unreliable sequenced, reliable, reliable ordered,
+  reliable sequenced (e as variantes com ACK receipt). O jogo usa principalmente
+  **reliable ordered no canal 0**. ✅
+- ACK / NACK com ranges de sequência. ✅
+- `ConnectedPing` / `ConnectedPong`, `ConnectionRequest`, `ConnectionRequestAccepted`,
+  `NewIncomingConnection`, `Disconnect`. ✅
+- Fragmentação e remontagem com `split_id`/`split_index`/`split_count`. **Falta.**
+- Retransmissão por RTO estimado a partir do RTT, e a máquina de estado da sessão.
+  **Falta.**
 
 ### Confirmado contra tráfego real (2026-07-30)
 
@@ -114,17 +128,6 @@ e a resposta espelha a contagem recebida.
 **Ranges de ACK ficam ranges.** Um único record pode reivindicar 16 milhões de números de
 sequência; expandir isso numa lista é negação de serviço com um pacote.
 
-**Fase conectada** (o trabalho real):
-- *Datagrama* com número de sequência próprio, carregando um ou mais *frames*.
-- Confiabilidades: unreliable, unreliable sequenced, reliable, reliable ordered,
-  reliable sequenced (e as variantes com ACK receipt). O jogo usa principalmente
-  **reliable ordered no canal 0**.
-- Fragmentação: payload maior que o MTU vira N fragmentos com `split_id`, `split_index`
-  e `split_count`; a remontagem é responsabilidade do receptor.
-- ACK / NACK com ranges de sequência, retransmissão por RTO estimado a partir do RTT.
-- `ConnectedPing` / `ConnectedPong` para keepalive e medição de RTT.
-- `Disconnect`.
-
 ### Riscos concretos
 
 - **Remontagem de fragmentos é superfície de ataque.** Um cliente pode anunciar
@@ -140,6 +143,9 @@ sequência; expandir isso numa lista é negação de serviço com um pacote.
 Um cliente Bedrock real vê o servidor na lista de mundos e completa a abertura de
 conexão até `ConnectionRequestAccepted`. Testes de fragmentação com payloads de 1 KB,
 64 KB e 1 MB fazem round-trip.
+
+Metade disso está feita pelo lado errado: nós **somos** o cliente que completa o
+handshake. Falta o servidor — e um cliente Bedrock real para exercitá-lo.
 
 ---
 
