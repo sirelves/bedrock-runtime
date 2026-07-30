@@ -17,4 +17,7 @@
 //!
 //! Status: not started. Milestones M0.3 and M0.4 — see `docs/ROADMAP.md`.
 
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
+pub mod bytes;
 pub mod version;
