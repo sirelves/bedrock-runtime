@@ -69,6 +69,10 @@ UDP não tem handshake de transporte, então qualquer um pode alegar ser qualque
 - **Amplificação:** nenhuma resposta a pacote não solicitado pode ser maior que o pacote
   recebido. Isso restringe o tamanho do payload de `UnconnectedPong` e é requisito de
   design, não configuração.
+- **Cookie na abertura de conexão.** O RakNet moderno responde ao `OpenConnectionRequest1`
+  com um cookie que o cliente precisa devolver no request 2. Um endereço de origem forjado
+  nunca recebe o cookie, então não avança — é o que impede o servidor de ser usado como
+  refletor UDP. Implementar isso é requisito, não opcional.
 
 #### 4. Plugins
 

@@ -57,9 +57,33 @@ madura em Rust — este é código próprio.
   aparecer, sem erro.
 - `OpenConnectionRequest1/2` e `OpenConnectionReply1/2` — negociação de MTU. O cliente
   sonda com pacotes de tamanhos decrescentes; o MTU acordado limita o tamanho do
-  fragmento daí em diante.
+  fragmento daí em diante. **Implementado e confirmado** — ver os três achados abaixo.
 - Todos os pacotes offline carregam a constante `MAGIC` de 16 bytes
   (`00 ff ff 00 fe fe fe fe fd fd fd fd 12 34 56 78`).
+
+### Confirmado contra tráfego real (2026-07-30)
+
+Fixtures em `crates/bedrock-raknet/tests/fixtures/`, obtidos com
+`cargo run -p bedrock-raknet --example connect`.
+
+**O MTU anunciado inclui os cabeçalhos IP e UDP.** Sondando um servidor com
+1492/1400/1200/576 bytes de payload, as respostas foram 1520/1428/1228/604 — exatamente
+28 bytes a mais em todos os degraus (20 de IPv4 + 8 de UDP). Tratar o número anunciado
+como tamanho de payload coloca todo datagrama cheio 28 bytes acima do limite: funciona
+em loopback e fragmenta ou some numa rede real. `payload_limit()` modela isso.
+
+**Os octetos IPv4 vão complementados.** Confirmado por ground truth, não por consenso
+entre implementações: o endereço que o servidor reportou para nós só bate com o IP
+público real sob a leitura complementada. A armadilha é que a leitura errada produz um
+endereço plausível — as duas são complemento uma da outra.
+
+**Existe um cookie de anti-amplificação.** Quando o servidor liga o flag de segurança no
+`Reply1`, ele envia um cookie de 4 bytes que o cliente precisa devolver no `Request2`.
+Um endereço de origem forjado nunca recebe o cookie, então não passa do request 1. Ler o
+flag errado desloca o campo de MTU em vez de falhar o decode — erro silencioso.
+
+**A versão do protocolo RakNet é 11**, e `IncompatibleProtocolVersion` (0x19) devolve a
+versão que o servidor fala. Não há motivo para adivinhar: pergunte.
 
 **Fase conectada** (o trabalho real):
 - *Datagrama* com número de sequência próprio, carregando um ou mais *frames*.
