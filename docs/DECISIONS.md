@@ -23,6 +23,7 @@ de ideia. Um ADR não é apagado; é substituído por outro que o marca como sup
 | [012](#adr-012--raknet-sans-io) | RakNet sans-io | Aceita |
 | [013](#adr-013--ring-para-criptografia) | `ring` para criptografia | Parcialmente superada por [014](#adr-014--p384-para-o-par-de-chaves-do-servidor) |
 | [014](#adr-014--p384-para-o-par-de-chaves-do-servidor) | `p384` para o par de chaves do servidor | Aceita |
+| [015](#adr-015--sem-proxy-de-captura) | Sem proxy de captura | Aceita |
 
 ---
 
@@ -195,7 +196,7 @@ de comportamento do protocolo ([PROTOCOL.md](PROTOCOL.md#referências)), nunca c
 - **Negativa: significativamente mais lento até o primeiro cliente conectar.** É o preço
   do M0 ser grande.
 - Negativa: erros que aqueles projetos já resolveram serão redescobertos.
-- Mitigação: fixtures capturados de tráfego real ([M0.4](ROADMAP.md#m04--proxy-de-captura))
+- Mitigação: fixtures capturados de tráfego real ([ADR-015](DECISIONS.md#adr-015--sem-proxy-de-captura))
   substituem a leitura de código alheio como fonte de verdade.
 
 ---
@@ -436,3 +437,47 @@ identidade e para SHA-256.
 **Correção registrada.** O ADR-013 escolheu `ring` para o ECDH **sem verificar** se uma
 chave podia assinar e acordar. Não pode. A medição de footprint que motivou o ADR-013
 estava certa; a checagem de capacidade não foi feita.
+
+---
+
+## ADR-015 — Sem proxy de captura
+
+Remove o M0.4 do [ROADMAP.md](ROADMAP.md), que existia desde a primeira versão do
+projeto e já tinha sido reordenado uma vez.
+
+**Contexto.** O plano era um proxy MITM entre um cliente real e um servidor oficial,
+para capturar o `StartGame` decifrado. A justificativa era boa: `StartGame` tem 25
+campos e falha em silêncio, e adivinhar isso é o cenário que o
+[PROTOCOL.md](PROTOCOL.md) manda evitar.
+
+**Por que não funciona.** O token de identidade **amarra a chave pública do cliente**
+(`cpk`), assinada pela Microsoft. O servidor real faz o ECDH com essa chave. Um proxy
+consegue ser servidor para o cliente, mas para ser cliente do servidor real precisaria
+da chave privada correspondente ao `cpk` — que não tem. Encaminhar o token do cliente
+não ajuda: o servidor deriva uma chave que o proxy não consegue reproduzir.
+
+Ou o proxy tem a chave privada do cliente, ou autentica com identidade própria — e aí
+não é proxy, é cliente. **A criptografia que implementamos no M0.3 é exatamente o que
+impede esse ataque**, o que é uma boa notícia disfarçada de obstáculo.
+
+**Por que não é necessário.** A Mojang publica os schemas JSON de cada pacote, incluindo
+`StartGame` completo: 25 campos com índice ordinal, tipo e opções de serialização, mais
+os tipos aninhados. Já usamos esses schemas para `NetworkSettings`, `PlayStatus`, `Login`
+e a negociação de pacotes, e todos bateram com o tráfego real na primeira tentativa.
+Documentação campo a campo do fabricante não é adivinhação.
+
+**Decisão.** O M0.4 sai. `StartGame` é implementado a partir dos schemas oficiais, e a
+verificação continua sendo a mesma de sempre: um cliente real conectando.
+
+**Consequências.**
+- Positiva: um milestone inteiro a menos, e ele era grande.
+- Positiva: a impossibilidade do MITM é um resultado de segurança do projeto, não só um
+  obstáculo de engenharia.
+- **Negativa: os schemas não trazem os artefatos de dados** — paleta de blocos,
+  definições de bioma, identificadores de entidade. Isso é dump da versão, não estrutura,
+  e continua sem fonte. A aposta é que o cliente aceite listas vazias e use a paleta que
+  ele já tem embutida; se não aceitar, é preciso extrair do Bedrock Dedicated Server
+  oficial, e isso volta como item de roadmap.
+- Negativa: sem captura, um campo mal interpretado se manifesta como um cliente que
+  desconecta sem explicação. Mitigado pelo mesmo método incremental que trouxe o projeto
+  até aqui: um pacote por vez, verificando contra um cliente real.

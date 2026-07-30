@@ -19,6 +19,7 @@ use bedrock_protocol::handshake::{
 };
 use bedrock_protocol::login::{self, ID_LOGIN, Login, TOKEN_AUDIENCE, TOKEN_ISSUER};
 use bedrock_protocol::play_status::{self, Status};
+use bedrock_protocol::resource_packs::{self, ID_RESOURCE_PACK_CLIENT_RESPONSE, Response};
 use bedrock_protocol::version::{MINECRAFT_VERSION, PROTOCOL_VERSION};
 use bedrock_raknet::listener::{Event as RakEvent, Listener, ListenerConfig};
 use std::collections::{HashMap, HashSet};
@@ -82,6 +83,13 @@ pub enum Event {
         peer: SocketAddr,
         /// What it said.
         status: Status,
+    },
+    /// The client answered the resource pack offer.
+    PacksAnswered {
+        /// Who answered.
+        peer: SocketAddr,
+        /// What it said.
+        response: Response,
     },
     /// An encrypted packet decrypted and its checksum held.
     Decrypted {
@@ -409,6 +417,22 @@ impl Server {
 
                 self.send_encrypted(peer, &[play_status::packet(status)], now);
                 events.push(Event::PlayStatusSent { peer, status });
+
+                if status == Status::LoginSuccess {
+                    self.send_encrypted(peer, &[resource_packs::packs_info_empty()], now);
+                }
+            } else if packet.id == ID_RESOURCE_PACK_CLIENT_RESPONSE {
+                let response = resource_packs::decode_response(&packet.body).ok().flatten();
+                if let Some(response) = response {
+                    events.push(Event::PacksAnswered { peer, response });
+
+                    // Finishing the offer earns the stack; finishing the stack means
+                    // the client is waiting for the world.
+                    if response == Response::DownloadingFinished {
+                        let stack = resource_packs::pack_stack_empty(MINECRAFT_VERSION);
+                        self.send_encrypted(peer, &[stack], now);
+                    }
+                }
             } else {
                 events.push(Event::Decrypted {
                     peer,
