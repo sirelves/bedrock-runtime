@@ -93,7 +93,14 @@ fn report(event: &Event, options: &Options, captured: &mut usize) -> Result<(), 
         }
         Event::HandshakeAccepted(peer) => {
             println!("HANDSHAKE ACEITO  {peer}");
-            println!("  o cliente derivou a mesma chave e mudou para stream cifrado");
+            println!("  decifrado com sucesso: a derivacao, o IV e o checksum estao certos");
+        }
+        Event::Decrypted { peer, id, len } => {
+            println!("cifrado ok    {peer}  packet {id}, {len} bytes decifrados");
+        }
+        Event::DecryptionFailed(peer) => {
+            println!("FALHA AO DECIFRAR  {peer}");
+            println!("  a derivacao, o IV ou a formula do checksum esta errada");
         }
         Event::Compressed { peer, method } => {
             println!("compressed    {peer}  batch declares {method:?}, which we cannot read yet");

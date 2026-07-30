@@ -17,5 +17,6 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 pub mod agreement;
+pub mod cipher;
 pub mod handshake;
 pub mod jwt;

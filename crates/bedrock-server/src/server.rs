@@ -8,6 +8,7 @@
 //! reported so a capture can be taken of bytes no third-party documentation covers.
 
 use bedrock_crypto::agreement::ServerKey;
+use bedrock_crypto::cipher::Cipher;
 use bedrock_crypto::handshake as token;
 use bedrock_protocol::batch;
 use bedrock_protocol::handshake::{
@@ -61,6 +62,18 @@ pub enum Event {
     },
     /// A client accepted our handshake and switched to an encrypted stream.
     HandshakeAccepted(SocketAddr),
+    /// An encrypted packet decrypted and its checksum held.
+    Decrypted {
+        /// Who sent it.
+        peer: SocketAddr,
+        /// The packet id inside.
+        id: u32,
+        /// How many bytes of plaintext came out.
+        len: usize,
+    },
+    /// An encrypted packet did not decrypt. The derivation, the IV or the checksum
+    /// formula is wrong, and they all fail this way.
+    DecryptionFailed(SocketAddr),
     /// A batch arrived compressed with a method we cannot read yet.
     Compressed {
         /// Who sent it.
@@ -97,6 +110,8 @@ pub struct Server {
     settled: HashSet<SocketAddr>,
     /// One ephemeral key per peer, kept until the session key is derived.
     keys: HashMap<SocketAddr, ServerKey>,
+    /// The encrypted stream, once a peer has one.
+    ciphers: HashMap<SocketAddr, Cipher>,
 }
 
 impl Server {
@@ -116,6 +131,7 @@ impl Server {
             listener: Listener::new(local, guid, advertisement, config),
             settled: HashSet::new(),
             keys: HashMap::new(),
+            ciphers: HashMap::new(),
         }
     }
 
@@ -150,6 +166,7 @@ impl Server {
                 RakEvent::Disconnected(peer) => {
                     self.settled.remove(&peer);
                     self.keys.remove(&peer);
+                    self.ciphers.remove(&peer);
                     events.push(Event::Disconnected(peer));
                 }
                 RakEvent::Payload(peer, payload) => {
@@ -161,6 +178,17 @@ impl Server {
     }
 
     fn on_payload(&mut self, peer: SocketAddr, payload: &[u8], now: Instant) -> Vec<Event> {
+        // Once a peer has a cipher, everything after the batch marker is ciphertext.
+        if let Some(cipher) = self.ciphers.get_mut(&peer) {
+            let Some(body) = payload.strip_prefix(&[batch::MARKER]) else {
+                return vec![Event::Undecodable(peer, payload.to_vec())];
+            };
+            let Ok(plaintext) = cipher.decrypt(body) else {
+                return vec![Event::DecryptionFailed(peer)];
+            };
+            return self.on_plaintext(peer, &plaintext, now);
+        }
+
         let packets = if self.settled.contains(&peer) {
             match batch::decode_with_method(payload) {
                 Ok((batch::Method::None, packets)) => packets,
@@ -224,6 +252,16 @@ impl Server {
         let key = ServerKey::generate();
         let reply = batch::encode_with_method(&[server_to_client_handshake(&token::token(&key))]);
         let _ = self.listener.send(peer, reply, now);
+
+        // The client's public key travels inside the identity token, which this layer
+        // does not verify. Agreement uses it either way; verification is what says the
+        // key belongs to who it claims, and that is the caller's business.
+        if let Some(client_key) = client_public_key(login.identity) {
+            let salt = *key.salt();
+            if let Ok(session) = key.agree(&client_key, &salt) {
+                self.ciphers.insert(peer, Cipher::new(&session));
+            }
+        }
         self.keys.insert(peer, key);
 
         vec![Event::LoginReceived {
@@ -231,6 +269,51 @@ impl Server {
             client_protocol: login.client_protocol,
             identity: login.identity.to_owned(),
         }]
+    }
+}
+
+/// Pulls the client's public key out of an identity document.
+///
+/// The claims are read without verifying the signature: this is the key we agree with,
+/// and whether it belongs to who the token says is a separate question, answered
+/// elsewhere with the issuer's published keys.
+fn client_public_key(identity: &str) -> Option<Vec<u8>> {
+    use base64::Engine;
+    let outer: serde_json::Value = serde_json::from_str(identity).ok()?;
+    let token = outer.get("Token")?.as_str()?;
+    let claims = token.split('.').nth(1)?;
+    let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(claims)
+        .ok()?;
+    let claims: serde_json::Value = serde_json::from_slice(&decoded).ok()?;
+    base64::engine::general_purpose::STANDARD
+        .decode(claims.get("cpk")?.as_str()?)
+        .ok()
+}
+
+impl Server {
+    /// Handles packets that came out of the encrypted stream.
+    fn on_plaintext(&mut self, peer: SocketAddr, plaintext: &[u8], _now: Instant) -> Vec<Event> {
+        let Ok(packets) = batch::decode_packets(bedrock_protocol::bytes::Reader::new(
+            plaintext.get(1..).unwrap_or_default(),
+        )) else {
+            return vec![Event::Undecodable(peer, plaintext.to_vec())];
+        };
+
+        packets
+            .into_iter()
+            .map(|packet| {
+                if packet.id == ID_CLIENT_TO_SERVER_HANDSHAKE {
+                    Event::HandshakeAccepted(peer)
+                } else {
+                    Event::Decrypted {
+                        peer,
+                        id: packet.id,
+                        len: packet.body.len(),
+                    }
+                }
+            })
+            .collect()
     }
 }
 
