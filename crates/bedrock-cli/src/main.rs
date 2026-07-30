@@ -80,6 +80,21 @@ fn report(event: &Event, options: &Options, captured: &mut usize) -> Result<(), 
             println!("  head  {}", head(body));
             save(options, captured, &format!("packet-{id}"), body)?;
         }
+        Event::LoginReceived {
+            peer,
+            client_protocol,
+            identity,
+        } => {
+            println!(
+                "login         {peer}  protocol {client_protocol}, identity {} bytes",
+                identity.len()
+            );
+            println!("  -> ServerToClientHandshake, encryption starts after this");
+        }
+        Event::HandshakeAccepted(peer) => {
+            println!("HANDSHAKE ACEITO  {peer}");
+            println!("  o cliente derivou a mesma chave e mudou para stream cifrado");
+        }
         Event::Compressed { peer, method } => {
             println!("compressed    {peer}  batch declares {method:?}, which we cannot read yet");
         }

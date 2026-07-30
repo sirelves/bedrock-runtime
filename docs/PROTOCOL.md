@@ -216,6 +216,30 @@ O fluxo, na ordem em que acontece:
 - Se a validação da cadeia da Mojang será obrigatória por padrão (modo online) — ver
   [SECURITY.md](../SECURITY.md#2-handshake-e-autenticação).
 
+### Implementado
+
+- `NetworkSettings` respondendo com compressão desligada, confirmado contra cliente real.
+- `Login` decodificado, confirmado contra captura real.
+- Token de identidade verificado: RS256 contra as chaves publicadas em
+  `authorization.franchise.minecraft-services.net`, confirmado com token e chaves reais.
+- Acordo ECDH P-384 com a chave real do cliente, e o `ServerToClientHandshake` assinado
+  em ES384.
+
+**A mesma chave assina e acorda.** O cliente lê a chave pública do `x5u`, verifica a
+assinatura com ela, e faz o ECDH com ela. Isso descartou o `ring` para o par de chaves
+([ADR-014](DECISIONS.md#adr-014--p384-para-o-par-de-chaves-do-servidor)).
+
+### Ainda não confirmado
+
+Três coisas, e todas falham do mesmo jeito — o cliente deriva outra chave, não diz nada,
+e some:
+
+1. A fórmula de derivação `SHA-256(salt || segredo)`.
+2. O alfabeto base64 do `x5u` e do `salt` — padrão ou url-safe.
+3. O modo da cifra e a fórmula do contador por pacote.
+
+O `ClientToServerHandshake` chegando é o que confirma 1 e 2 de uma vez.
+
 ### Critério de conclusão da camada
 
 `ClientToServerHandshake` chega, descriptografa e valida. Teste de round-trip da cifra

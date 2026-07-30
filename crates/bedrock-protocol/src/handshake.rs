@@ -126,6 +126,31 @@ impl NetworkSettings {
     }
 }
 
+/// `ServerToClientHandshake`, server to client. Carries the token that starts encryption.
+pub const ID_SERVER_TO_CLIENT_HANDSHAKE: u32 = 3;
+
+/// `ClientToServerHandshake`, client to server. Empty; its arrival is the message.
+pub const ID_CLIENT_TO_SERVER_HANDSHAKE: u32 = 4;
+
+/// Wraps a signed handshake token in its packet.
+///
+/// The token is built by `bedrock-crypto`, which holds the key. This crate only knows
+/// how a string goes on the wire.
+pub fn server_to_client_handshake(token: &str) -> Packet {
+    let mut w = Writer::new();
+    w.prefixed(token.as_bytes());
+    Packet::new(ID_SERVER_TO_CLIENT_HANDSHAKE, w.finish())
+}
+
+/// Reads the token out of a `ServerToClientHandshake` body.
+pub fn decode_handshake_token(body: &[u8]) -> Result<&str, DecodeError> {
+    let mut r = Reader::new(body);
+    std::str::from_utf8(r.prefixed()?).map_err(|_| DecodeError::UnexpectedEnd {
+        needed: 0,
+        available: 0,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -187,6 +212,27 @@ mod tests {
             NetworkSettings::decode(&w.finish()).unwrap().compression,
             Compression::None
         );
+    }
+
+    #[test]
+    fn a_handshake_token_round_trips() {
+        let token = "aaa.bbb.ccc";
+        let packet = server_to_client_handshake(token);
+        assert_eq!(packet.id, ID_SERVER_TO_CLIENT_HANDSHAKE);
+        assert_eq!(decode_handshake_token(&packet.body).unwrap(), token);
+    }
+
+    /// A token is length-prefixed, not the whole body, so a batch can carry more after it.
+    #[test]
+    fn the_token_is_length_prefixed() {
+        let packet = server_to_client_handshake("ab");
+        assert_eq!(packet.body, vec![2, b'a', b'b']);
+    }
+
+    #[test]
+    fn a_truncated_token_fails_cleanly() {
+        assert!(decode_handshake_token(&[9, b'a']).is_err());
+        assert!(decode_handshake_token(&[]).is_err());
     }
 
     #[test]

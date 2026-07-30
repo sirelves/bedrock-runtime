@@ -21,7 +21,8 @@ de ideia. Um ADR não é apagado; é substituído por outro que o marca como sup
 | [010](#adr-010--seções-de-chunk-imutáveis) | Seções de chunk imutáveis | Aceita |
 | [011](#adr-011--sem-io-de-mundo-no-m0) | Sem I/O de mundo no M0 | Aceita |
 | [012](#adr-012--raknet-sans-io) | RakNet sans-io | Aceita |
-| [013](#adr-013--ring-para-criptografia) | `ring` para criptografia | Aceita |
+| [013](#adr-013--ring-para-criptografia) | `ring` para criptografia | Parcialmente superada por [014](#adr-014--p384-para-o-par-de-chaves-do-servidor) |
+| [014](#adr-014--p384-para-o-par-de-chaves-do-servidor) | `p384` para o par de chaves do servidor | Aceita |
 
 ---
 
@@ -401,3 +402,37 @@ estava errada.
 
 **O que nos faria mudar de ideia.** O `ring` ficar sem manutenção — nesse caso o
 `aws-lc-rs` é substituto quase drop-in.
+
+---
+
+## ADR-014 — `p384` para o par de chaves do servidor
+
+Supera a parte do [ADR-013](#adr-013--ring-para-criptografia) que dizia usar `ring`
+para o ECDH. A parte sobre verificação RSA continua valendo.
+
+**Contexto.** O `ServerToClientHandshake` é um JWT assinado cujo cabeçalho `x5u` carrega
+a chave pública do servidor. O cliente usa essa chave para **duas** coisas: verificar a
+assinatura do token e fazer o acordo ECDH. É obrigatoriamente a mesma chave — assinar
+com outra ou falha na verificação, ou é mentira sobre quem detém o quê.
+
+O `ring` não permite isso. O `EphemeralPrivateKey` do módulo `agreement` não pode ser
+importado nem exportado: o acesso ao escalar existe só sob `#[cfg(test)]`, marcado
+`#[deprecated]` e com o comentário `/// Do not use.` É recusa deliberada, e em geral é
+boa higiene — separar chave de assinatura de chave de acordo. Só que este protocolo
+exige o contrário.
+
+**Decisão.** O par de chaves P-384 do servidor vem do `p384` (RustCrypto), que faz ECDSA
+e ECDH a partir de um `SecretKey`. O `ring` permanece para verificação RSA do token de
+identidade e para SHA-256.
+
+**Consequências.**
+- Positiva: uma chave, usada como o protocolo manda, com teste provando que a assinatura
+  verifica sob a chave do acordo.
+- **Negativa: +30 crates.** De 15 para 45 na árvore. É o custo direto desta restrição.
+- Negativa: duas famílias de criptografia no projeto. Aceito — verificação RSA e par de
+  chaves são preocupações independentes, e trocar o `ring` pelo `rsa` do RustCrypto para
+  unificar traria de volta a advisory que o ADR-013 evitou.
+
+**Correção registrada.** O ADR-013 escolheu `ring` para o ECDH **sem verificar** se uma
+chave podia assinar e acordar. Não pode. A medição de footprint que motivou o ADR-013
+estava certa; a checagem de capacidade não foi feita.

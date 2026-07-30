@@ -7,13 +7,17 @@
 //! It answers `RequestNetworkSettings` and nothing else yet. Everything past that is
 //! reported so a capture can be taken of bytes no third-party documentation covers.
 
+use bedrock_crypto::agreement::ServerKey;
+use bedrock_crypto::handshake as token;
 use bedrock_protocol::batch;
 use bedrock_protocol::handshake::{
-    ID_REQUEST_NETWORK_SETTINGS, NetworkSettings, RequestNetworkSettings,
+    ID_CLIENT_TO_SERVER_HANDSHAKE, ID_REQUEST_NETWORK_SETTINGS, NetworkSettings,
+    RequestNetworkSettings, server_to_client_handshake,
 };
+use bedrock_protocol::login::{self, ID_LOGIN, Login};
 use bedrock_protocol::version::{MINECRAFT_VERSION, PROTOCOL_VERSION};
 use bedrock_raknet::listener::{Event as RakEvent, Listener, ListenerConfig};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
@@ -45,6 +49,18 @@ pub enum Event {
         /// Its body.
         body: Vec<u8>,
     },
+    /// A client presented a login. The identity is not verified here — that needs the
+    /// issuer's keys, which live outside this crate.
+    LoginReceived {
+        /// Who logged in.
+        peer: SocketAddr,
+        /// The protocol version the login declares.
+        client_protocol: u32,
+        /// The identity document, verbatim.
+        identity: String,
+    },
+    /// A client accepted our handshake and switched to an encrypted stream.
+    HandshakeAccepted(SocketAddr),
     /// A batch arrived compressed with a method we cannot read yet.
     Compressed {
         /// Who sent it.
@@ -79,6 +95,8 @@ pub struct Server {
     /// byte from that point on, so the same bytes decode two different ways depending
     /// on which side of this the peer is.
     settled: HashSet<SocketAddr>,
+    /// One ephemeral key per peer, kept until the session key is derived.
+    keys: HashMap<SocketAddr, ServerKey>,
 }
 
 impl Server {
@@ -97,6 +115,7 @@ impl Server {
         Self {
             listener: Listener::new(local, guid, advertisement, config),
             settled: HashSet::new(),
+            keys: HashMap::new(),
         }
     }
 
@@ -130,6 +149,7 @@ impl Server {
                 RakEvent::Connected(peer) => events.push(Event::Connected(peer)),
                 RakEvent::Disconnected(peer) => {
                     self.settled.remove(&peer);
+                    self.keys.remove(&peer);
                     events.push(Event::Disconnected(peer));
                 }
                 RakEvent::Payload(peer, payload) => {
@@ -174,6 +194,10 @@ impl Server {
                     peer,
                     client_protocol,
                 });
+            } else if packet.id == ID_LOGIN {
+                events.extend(self.on_login(peer, &packet.body, now));
+            } else if packet.id == ID_CLIENT_TO_SERVER_HANDSHAKE {
+                events.push(Event::HandshakeAccepted(peer));
             } else {
                 events.push(Event::Unhandled {
                     peer,
@@ -183,6 +207,30 @@ impl Server {
             }
         }
         events
+    }
+}
+
+impl Server {
+    /// Answers a login with our public key and salt.
+    ///
+    /// The identity is reported rather than verified: verification needs the issuer's
+    /// published keys, and fetching those is I/O, which does not belong in a sans-io
+    /// layer. The caller decides whether to trust what it is told.
+    fn on_login(&mut self, peer: SocketAddr, body: &[u8], now: Instant) -> Vec<Event> {
+        let Ok(login) = Login::decode(body, &login::Limits::default()) else {
+            return vec![Event::Undecodable(peer, body.to_vec())];
+        };
+
+        let key = ServerKey::generate();
+        let reply = batch::encode_with_method(&[server_to_client_handshake(&token::token(&key))]);
+        let _ = self.listener.send(peer, reply, now);
+        self.keys.insert(peer, key);
+
+        vec![Event::LoginReceived {
+            peer,
+            client_protocol: login.client_protocol,
+            identity: login.identity.to_owned(),
+        }]
     }
 }
 
@@ -217,9 +265,11 @@ mod tests {
         assert_eq!(settings.compression_threshold, 0);
     }
 
+    /// Id 300 is not one we handle. Ids we do handle are tested by their own paths —
+    /// this one exists to prove the rest is reported rather than silently dropped.
     #[test]
     fn an_unknown_packet_is_reported_rather_than_dropped() {
-        let payload = batch::encode(&[Packet::new(1, vec![1, 2, 3])]);
+        let payload = batch::encode(&[Packet::new(300, vec![1, 2, 3])]);
         let mut server = Server::new("0.0.0.0:19132".parse().unwrap(), 1, "MCPE;x");
         let peer: SocketAddr = "203.0.113.5:1234".parse().unwrap();
 
@@ -228,7 +278,7 @@ mod tests {
             events,
             vec![Event::Unhandled {
                 peer,
-                id: 1,
+                id: 300,
                 body: vec![1, 2, 3]
             }]
         );
