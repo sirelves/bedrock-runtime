@@ -78,7 +78,9 @@ pub fn pack_stack_empty(base_game_version: &str) -> Packet {
     w.u8(0); // texture pack required
     w.varint(0); // no texture packs
     w.prefixed(base_game_version.as_bytes());
-    w.varint(0).u8(0); // no experiment toggles, never toggled
+    // The experiment count is a fixed u32, unlike the pack count above it. Writing a
+    // varint here is three bytes short and everything after it reads off the end.
+    w.u32(0).u8(0); // no experiment toggles, never toggled
     w.u8(0); // no editor packs
 
     Packet::new(ID_RESOURCE_PACK_STACK, w.finish())
@@ -133,6 +135,8 @@ mod tests {
         assert_eq!(r.prefixed().unwrap(), b"1.26.30");
     }
 
+    /// The experiment count is a fixed u32 while the pack count above it is a varint.
+    /// Writing a varint here leaves the packet three bytes short.
     #[test]
     fn the_stack_declares_no_experiments() {
         let packet = pack_stack_empty("*");
@@ -140,7 +144,9 @@ mod tests {
         r.u8().unwrap();
         r.varint().unwrap();
         r.prefixed().unwrap();
-        assert_eq!(r.varint().unwrap(), 0, "no toggles");
+        assert_eq!(r.u32().unwrap(), 0, "no toggles, as a fixed u32");
         assert_eq!(r.u8().unwrap(), 0, "never toggled");
+        assert_eq!(r.u8().unwrap(), 0, "no editor packs");
+        assert!(r.is_empty());
     }
 }

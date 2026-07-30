@@ -43,7 +43,9 @@ pub const DEFAULT_PORT: u16 = bedrock_raknet::DEFAULT_PORT_V4;
 /// and costs one connection instead of one guess.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Stage {
-    /// Stop after `StartGame` and the registries.
+    /// Stop after `StartGame`, sending no registries.
+    StartGame,
+    /// Stop after the registries.
     World,
     /// Stop after granting a chunk radius.
     Radius,
@@ -57,6 +59,7 @@ impl Stage {
     /// Parses a stage name.
     pub fn parse(name: &str) -> Option<Self> {
         Some(match name {
+            "start-game" => Self::StartGame,
             "world" => Self::World,
             "radius" => Self::Radius,
             "chunks" => Self::Chunks,
@@ -568,8 +571,10 @@ impl Server {
                             // follow reference biome ids, and a client that was never
                             // told the registry exists has to guess what to do with a
                             // reference into a table it does not know it has.
-                            for packet in registries::all_empty() {
-                                self.send_encrypted(peer, &[packet], now);
+                            if self.stage >= Stage::World {
+                                for packet in registries::all_empty() {
+                                    self.send_encrypted(peer, &[packet], now);
+                                }
                             }
 
                             events.push(Event::WorldSent(peer));
@@ -579,6 +584,9 @@ impl Server {
                 }
             } else if packet.id == ID_REQUEST_CHUNK_RADIUS {
                 if let Ok(request) = chunk_radius::decode_request(&packet.body) {
+                    if self.stage < Stage::Radius {
+                        continue;
+                    }
                     let granted = chunk_radius::grant(&request, SERVER_CHUNK_RADIUS);
                     self.send_encrypted(peer, &[chunk_radius::granted(granted)], now);
                     events.push(Event::ChunkRadiusGranted {
