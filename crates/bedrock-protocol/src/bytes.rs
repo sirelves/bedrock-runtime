@@ -108,6 +108,11 @@ impl<'a> Reader<'a> {
         Ok(f32::from_le_bytes(self.array()?))
     }
 
+    /// Reads a little-endian `u32`.
+    pub fn u32(&mut self) -> Result<u32> {
+        Ok(u32::from_le_bytes(self.array()?))
+    }
+
     /// Reads a big-endian `u32`, for the fields Mojang marks as such.
     pub fn u32_be(&mut self) -> Result<u32> {
         Ok(u32::from_be_bytes(self.array()?))
@@ -159,6 +164,12 @@ impl Writer {
 
     /// Appends a little-endian `f32`.
     pub fn f32(&mut self, v: f32) -> &mut Self {
+        self.buf.extend_from_slice(&v.to_le_bytes());
+        self
+    }
+
+    /// Appends a little-endian `u32`.
+    pub fn u32(&mut self, v: u32) -> &mut Self {
         self.buf.extend_from_slice(&v.to_le_bytes());
         self
     }
