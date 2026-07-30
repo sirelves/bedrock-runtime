@@ -46,9 +46,11 @@ próprio critério.
 - **Fechou quando:** `PROTOCOL_VERSION` e `MINECRAFT_VERSION` deixaram de ser `None`,
   com procedência registrada em [COMPATIBILITY.md](COMPATIBILITY.md#versão-alvo) e
   pongs crus versionados como fixtures.
-- Resultado: protocolo `1001`, versão `1.26.30`, corroborado por dois servidores
-  independentes — e a descoberta de que servidores grandes anunciam número de fachada,
-  o que tornou "uma fonte só" insuficiente por evidência, não por precaução.
+- Resultado: protocolo `1001`, corroborado por dois servidores independentes — e a
+  descoberta de que servidores grandes anunciam número de fachada, o que tornou "uma
+  fonte só" insuficiente por evidência, não por precaução.
+- **Confirmado no M0.2**, quando um cliente real declarou `1001` em claro no primeiro
+  pacote que enviou. Ver [COMPATIBILITY.md](COMPATIBILITY.md#versão-alvo).
 
 ### M0.2 — RakNet ✅
 - Abertura de conexão, MTU, confiabilidade, ordenação, fragmentação, ACK/NACK, keepalive.

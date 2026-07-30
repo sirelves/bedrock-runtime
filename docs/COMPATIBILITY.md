@@ -16,8 +16,8 @@ arquivo é a fonte de verdade — a tabela abaixo é derivada dele, não o contr
 
 | Campo | Valor | Confiança |
 |---|---|---|
-| Versão do Minecraft Bedrock | `1.26.30` | corroborada — 2 fontes independentes |
-| Número do protocolo | `1001` | corroborada — 2 fontes independentes |
+| Versão do Minecraft Bedrock | `1.26.30` | apenas exibição; nome diverge entre fontes |
+| Número do protocolo | `1001` | **confirmada** — declarada por um cliente real |
 | Algoritmo de compressão negociado | *a confirmar no M0.3* | — |
 | Modo da cifra | *a confirmar no M0.3* | — |
 
@@ -33,18 +33,23 @@ contadores como `20001/100001` jogadores. Um servidor de terceiro anuncia o que 
 operador configurou. O que dá peso ao `1001` é a concordância entre dois independentes,
 não o número em si.
 
-**Terceira fonte:** a Minecraft Wiki lista `1001` como o protocolo da release `26.35`,
-a estável atual. Três fontes independentes concordando, e ainda assim nenhuma delas é um
-cliente.
+**Confirmado por ground truth em 2026-07-30.** Um cliente Minecraft atualizado conectou
+ao nosso servidor e declarou `1001` no `RequestNetworkSettings` — um `int32` em claro,
+**antes de qualquer criptografia**, logo depois do handshake RakNet.
 
-**Como confirmar de verdade, e é barato.** O cliente declara a versão que fala no
-`RequestNetworkSettings` — um `int32` em claro, **antes de qualquer criptografia**,
-logo depois do handshake RakNet. Basta apontar um cliente para o servidor e ler os oito
-bytes. Feito em 2026-07-30 com um cliente na release 26.23: leu `975`, que é o protocolo
-daquela release. O número diferiu porque o cliente estava desatualizado, não porque o
-`1001` estivesse errado.
+Isso vale mais que as três fontes anteriores (dois servidores públicos e a wiki) juntas:
+elas dizem o que *servidores* anunciam, e o que importa é o que o *cliente* fala.
 
-Fixture e decodificação em `crates/bedrock-protocol/tests/first_contact.rs`.
+O caminho até ali passou por um cliente desatualizado que declarou `975` — o protocolo da
+release 26.23. Não era o `1001` estar errado; era o cliente estar atrás. E foi barato
+descobrir: uma conexão, oito bytes, nenhuma linha de criptografia.
+
+Fixtures das duas capturas e um teste que falha se a constante divergir do que o cliente
+declarou: `crates/bedrock-protocol/tests/first_contact.rs`.
+
+**O nome da versão é só exibição.** Os servidores públicos anunciam `1.26.30`, a wiki
+chama a release de `26.35`. O cliente compara o número, não o nome, então nada depende de
+resolver isso.
 
 ## Histórico de versões suportadas
 
