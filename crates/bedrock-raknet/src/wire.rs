@@ -90,6 +90,11 @@ impl<'a> Reader<'a> {
         Ok(u16::from_be_bytes(self.array()?))
     }
 
+    /// Reads a big-endian `u32`.
+    pub fn u32(&mut self) -> Result<u32> {
+        Ok(u32::from_be_bytes(self.array()?))
+    }
+
     /// Reads a big-endian `i64`.
     pub fn i64(&mut self) -> Result<i64> {
         Ok(i64::from_be_bytes(self.array()?))
@@ -122,6 +127,12 @@ impl Writer {
     /// Appends one byte.
     pub fn u8(&mut self, v: u8) -> &mut Self {
         self.buf.push(v);
+        self
+    }
+
+    /// Appends a big-endian `u32`.
+    pub fn u32(&mut self, v: u32) -> &mut Self {
+        self.buf.extend_from_slice(&v.to_be_bytes());
         self
     }
 

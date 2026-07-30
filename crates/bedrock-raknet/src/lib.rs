@@ -20,6 +20,7 @@
 
 pub mod address;
 pub mod advertisement;
+pub mod connect;
 pub mod offline;
 pub mod wire;
 
@@ -28,6 +29,9 @@ pub const DEFAULT_PORT_V4: u16 = 19132;
 
 /// Default UDP port for Bedrock over IPv6.
 pub const DEFAULT_PORT_V6: u16 = 19133;
+
+/// Largest MTU RakNet negotiates. Bedrock clients start here and walk down.
+pub const MAX_MTU: usize = 1492;
 
 /// The 16-byte constant carried by every offline (pre-connection) RakNet packet.
 pub const MAGIC: [u8; 16] = [
