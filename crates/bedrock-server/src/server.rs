@@ -13,6 +13,9 @@ use bedrock_crypto::cipher::Cipher;
 use bedrock_crypto::handshake as token;
 use bedrock_crypto::jwt::{self, Expected};
 use bedrock_protocol::batch;
+use bedrock_protocol::chunk_radius::{
+    self, ID_REQUEST_CHUNK_RADIUS, ID_SERVERBOUND_LOADING_SCREEN,
+};
 use bedrock_protocol::handshake::{
     ID_CLIENT_TO_SERVER_HANDSHAKE, ID_REQUEST_NETWORK_SETTINGS, NetworkSettings,
     RequestNetworkSettings, server_to_client_handshake,
@@ -30,6 +33,12 @@ use std::time::Instant;
 
 /// Default UDP port, from the transport.
 pub const DEFAULT_PORT: u16 = bedrock_raknet::DEFAULT_PORT_V4;
+
+/// How far this server streams chunks, in chunks.
+///
+/// Small on purpose while there is no world to stream: granting a radius the server
+/// cannot fill leaves the client waiting for chunks that are not coming.
+pub const SERVER_CHUNK_RADIUS: i32 = 4;
 
 /// The protocol version this server speaks.
 pub const TARGET_PROTOCOL: u32 = PROTOCOL_VERSION;
@@ -96,6 +105,15 @@ pub enum Event {
     ReadyForWorld(SocketAddr),
     /// `StartGame` went out.
     WorldSent(SocketAddr),
+    /// The client asked for a view distance and was answered.
+    ChunkRadiusGranted {
+        /// Who asked.
+        peer: SocketAddr,
+        /// What it asked for.
+        requested: i32,
+        /// What it got.
+        granted: i32,
+    },
     /// An encrypted packet decrypted and its checksum held.
     Decrypted {
         /// Who sent it.
@@ -468,6 +486,18 @@ impl Server {
                         _ => {}
                     }
                 }
+            } else if packet.id == ID_REQUEST_CHUNK_RADIUS {
+                if let Ok(request) = chunk_radius::decode_request(&packet.body) {
+                    let granted = chunk_radius::grant(&request, SERVER_CHUNK_RADIUS);
+                    self.send_encrypted(peer, &[chunk_radius::granted(granted)], now);
+                    events.push(Event::ChunkRadiusGranted {
+                        peer,
+                        requested: request.radius,
+                        granted,
+                    });
+                }
+            } else if packet.id == ID_SERVERBOUND_LOADING_SCREEN {
+                // The client narrating its own loading screen. Nothing is expected back.
             } else {
                 events.push(Event::Decrypted {
                     peer,

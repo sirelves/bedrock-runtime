@@ -80,10 +80,14 @@ próprio critério — eram seis até o proxy de captura ser removido
   `PlayStatus` em vez de aceito.
 
 ### M0.4 — Spawn
-- `ResourcePacks*`, `StartGame`, `BiomeDefinitionList`, paleta de blocos como artefato
-  de dados, `PlayStatus` de player spawn.
+- `ResourcePacks*` ✅, `StartGame` ✅, raio de chunk ✅, `LevelChunk`, `PlayStatus` de
+  player spawn.
 - **Fecha quando:** o cliente sai da tela de carregamento e mostra o jogador num mundo
   (ainda que vazio), sem desconectar por 60 segundos.
+- **A paleta de blocos vazia foi aceita.** A aposta do
+  [ADR-015](DECISIONS.md#adr-015--sem-proxy-de-captura) valeu: um cliente real parseou o
+  `StartGame` com a lista de blocos vazia, entrou na tela de carregamento e pediu chunks.
+  Não é preciso extrair a paleta do servidor oficial.
 
 ### M0.5 — Mundo gerado e movimentação
 - Gerador flat em memória, seções de chunk imutáveis
