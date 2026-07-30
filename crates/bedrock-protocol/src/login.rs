@@ -27,6 +27,17 @@ use std::fmt;
 /// `Login`, client to server.
 pub const ID_LOGIN: u32 = 1;
 
+/// Who must have issued a client's identity token, read from a real login.
+pub const TOKEN_ISSUER: &str = "https://authorization.franchise.minecraft-services.net/";
+
+/// The audience that token must be for. A token minted for a different audience is a
+/// valid token being replayed at the wrong service.
+pub const TOKEN_AUDIENCE: &str = "api://auth-minecraft-services/multiplayer";
+
+/// Where the issuer publishes its signing keys, from its OIDC discovery document.
+pub const TOKEN_KEYS_URL: &str =
+    "https://authorization.franchise.minecraft-services.net/.well-known/keys";
+
 /// What a login may cost before it is refused.
 #[derive(Debug, Clone, Copy)]
 pub struct Limits {

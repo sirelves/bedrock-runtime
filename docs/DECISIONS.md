@@ -21,6 +21,7 @@ de ideia. Um ADR não é apagado; é substituído por outro que o marca como sup
 | [010](#adr-010--seções-de-chunk-imutáveis) | Seções de chunk imutáveis | Aceita |
 | [011](#adr-011--sem-io-de-mundo-no-m0) | Sem I/O de mundo no M0 | Aceita |
 | [012](#adr-012--raknet-sans-io) | RakNet sans-io | Aceita |
+| [013](#adr-013--ring-para-criptografia) | `ring` para criptografia | Aceita |
 
 ---
 
@@ -352,3 +353,51 @@ poll_transmit() -> Option<datagrama>
 **O que nos faria mudar de ideia.** Se o driver acabar tão complexo que o bug migre para
 ele, a fronteira está no lugar errado. Sinal a observar: `bedrock-server` precisando
 replicar estado que já existe dentro de `Session`.
+
+---
+
+## ADR-013 — `ring` para criptografia
+
+**Contexto.** Até aqui o projeto tinha **zero dependências externas** em oito crates.
+Isso não foi acidente, mas também não é sustentável: o M0.3 precisa verificar
+assinaturas RS256, fazer acordo de chaves ECDH P-384 e cifrar um stream. Escrever
+qualquer uma dessas à mão é exatamente o que o [SECURITY.md](../SECURITY.md) proíbe.
+
+A escolha inicial foi RustCrypto, pelo argumento de que o `ring` não implementa
+AES-CFB8 — e o modo da cifra do Bedrock ainda não foi confirmado. Aí os números
+apareceram.
+
+**Medição.**
+
+| conjunto | crates transitivos |
+|---|---|
+| `ring` + `serde_json` + `base64` | **15** |
+| RustCrypto: `rsa` + `p384` + `sha2` | **49** |
+
+E o `rsa` do RustCrypto carrega a [RUSTSEC-2023-0071](https://rustsec.org/advisories/RUSTSEC-2023-0071.html)
+(Marvin attack), **aberta e sem correção**. Ela afeta operações com chave privada, e nós
+só verificamos com chave pública — mas o `cargo-deny` do nosso CI bloqueia merge, então
+usá-la exigiria silenciar uma advisory de segurança. Isso envelhece mal.
+
+**Decisão.** `ring` para verificação RSA e para o ECDH P-384. Se a cifra do Bedrock for
+CFB8, entram `aes` e `cfb8` do RustCrypto — que são crates pequenos, não os 49 acima (o
+número é dominado pelo `num-bigint-dig` do `rsa` e pela pilha `elliptic-curve` do `p384`).
+
+**Consequências.**
+- Positiva: um terço das dependências, e nenhuma advisory para silenciar.
+- Positiva: `ring` é assembly derivado do BoringSSL, auditado, e verificação de
+  assinatura é precisamente o que ele faz melhor.
+- Negativa: traz toolchain C na build. Os alvos do CI (x86-64 e aarch64) são suportados.
+- Negativa: se a cifra for CFB8, o projeto passa a ter duas famílias de cripto. Aceito —
+  são preocupações independentes, e a alternativa era escolher a família inteira apostando
+  num modo de cifra que ainda não medimos.
+- **Negativa: acabou a marca de zero dependências.** O `CONTRIBUTING.md` exige
+  justificativa por dependência nova; esta é a justificativa.
+
+**Correção registrada.** Eu havia recomendado RustCrypto neste projeto **antes de medir**,
+com base no argumento do CFB8. Medindo, o argumento não sobrevive: o escape do CFB8 custa
+poucos crates, e a diferença de footprint e de advisory é grande. A recomendação anterior
+estava errada.
+
+**O que nos faria mudar de ideia.** O `ring` ficar sem manutenção — nesse caso o
+`aws-lc-rs` é substituto quase drop-in.
