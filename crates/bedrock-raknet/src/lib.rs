@@ -27,6 +27,7 @@ pub mod offline;
 pub mod online;
 pub mod order;
 pub mod retransmit;
+pub mod session;
 pub mod split;
 pub mod wire;
 
