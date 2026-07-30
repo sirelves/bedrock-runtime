@@ -23,6 +23,7 @@ use bedrock_protocol::handshake::{
 use bedrock_protocol::level_chunk::{self, BIOME_PLAINS};
 use bedrock_protocol::login::{self, ID_LOGIN, Login, TOKEN_AUDIENCE, TOKEN_ISSUER};
 use bedrock_protocol::play_status::{self, Status};
+use bedrock_protocol::registries;
 use bedrock_protocol::resource_packs::{self, ID_RESOURCE_PACK_CLIENT_RESPONSE, Response};
 use bedrock_protocol::start_game::StartGame;
 use bedrock_protocol::version::{MINECRAFT_VERSION, PROTOCOL_VERSION};
@@ -522,6 +523,15 @@ impl Server {
                                 concat!("bedrock-runtime ", env!("CARGO_PKG_VERSION")),
                             );
                             self.send_encrypted(peer, &[world.packet()], now);
+
+                            // Items, entities and biomes, all empty. The chunks that
+                            // follow reference biome ids, and a client that was never
+                            // told the registry exists has to guess what to do with a
+                            // reference into a table it does not know it has.
+                            for packet in registries::all_empty() {
+                                self.send_encrypted(peer, &[packet], now);
+                            }
+
                             events.push(Event::WorldSent(peer));
                         }
                         _ => {}
