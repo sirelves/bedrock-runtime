@@ -11,7 +11,7 @@
 //!
 //! Compression sits between the marker and the packets once `NetworkSettings` has
 //! negotiated it. Until then, and whenever the negotiated algorithm is
-//! [`Compression::None`], the packets follow the marker directly — which is what makes
+//! [`crate::handshake::Compression::None`], the packets follow the marker directly — which is what makes
 //! it possible to read a login without implementing zlib.
 
 use crate::bytes::{DecodeError, Reader, Writer};
