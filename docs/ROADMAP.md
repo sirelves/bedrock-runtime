@@ -28,8 +28,9 @@ não sabe a diferença — e antecipar o formato de armazenamento aqui misturari
 problemas difíceis num só milestone.
 
 Este é o maior milestone do projeto e é assim de propósito: nada abaixo disso prova que
-o protocolo funciona. Internamente ele se divide em seis etapas, cada uma com seu
-próprio critério.
+o protocolo funciona. Internamente ele se divide em cinco etapas, cada uma com seu
+próprio critério — eram seis até o proxy de captura ser removido
+([ADR-015](DECISIONS.md#adr-015--sem-proxy-de-captura)).
 
 > **Correção de ordem.** A versão anterior deste roadmap colocava o proxy de captura
 > como primeira etapa, argumentando que sem ele as demais viram tentativa e erro. Isso
@@ -78,22 +79,13 @@ próprio critério.
 - **Fecha quando:** um login com token inválido ou expirado é recusado com
   `PlayStatus` em vez de aceito.
 
-### M0.4 — Proxy de captura
-- Proxy MITM entre um cliente real e um servidor oficial, com dump dos pacotes já
-  descriptografados. Só é possível aqui: reusa o RakNet do M0.2 nos dois sentidos e a
-  criptografia do M0.3 nas duas pontas.
-- **Fecha quando:** um login completo até o spawn está capturado, descriptografado e
-  salvo como fixtures.
-- É o que torna o M0.5 viável em vez de adivinhação — `StartGame` tem dezenas de campos
-  e falha em silêncio.
-
-### M0.5 — Spawn
+### M0.4 — Spawn
 - `ResourcePacks*`, `StartGame`, `BiomeDefinitionList`, paleta de blocos como artefato
   de dados, `PlayStatus` de player spawn.
 - **Fecha quando:** o cliente sai da tela de carregamento e mostra o jogador num mundo
   (ainda que vazio), sem desconectar por 60 segundos.
 
-### M0.6 — Mundo gerado e movimentação
+### M0.5 — Mundo gerado e movimentação
 - Gerador flat em memória, seções de chunk imutáveis
   ([ADR-010](DECISIONS.md#adr-010--seções-de-chunk-imutáveis)), `LevelChunk`,
   `NetworkChunkPublisherUpdate`, streaming por raio, entrada de movimentação do jogador.

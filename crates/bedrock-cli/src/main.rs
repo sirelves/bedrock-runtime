@@ -153,6 +153,9 @@ fn report(event: &Event, options: &Options, captured: &mut usize) -> Result<(), 
             println!("  -> PlayStatus {status:?}  (cifrado)");
             let _ = peer;
         }
+        Event::PacksAnswered { peer, response } => {
+            println!("packs         {peer}  cliente respondeu {response:?}");
+        }
         Event::Decrypted { peer, id, len } => {
             println!("cifrado ok    {peer}  packet {id}, {len} bytes decifrados");
         }

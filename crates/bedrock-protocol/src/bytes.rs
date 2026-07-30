@@ -174,6 +174,12 @@ impl Writer {
         self
     }
 
+    /// Appends a little-endian `u64`.
+    pub fn u64(&mut self, v: u64) -> &mut Self {
+        self.buf.extend_from_slice(&v.to_le_bytes());
+        self
+    }
+
     /// Appends a big-endian `u32`.
     pub fn u32_be(&mut self, v: u32) -> &mut Self {
         self.buf.extend_from_slice(&v.to_be_bytes());
