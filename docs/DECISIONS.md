@@ -21,6 +21,8 @@ de ideia. Um ADR não é apagado; é substituído por outro que o marca como sup
 | [010](#adr-010--seções-de-chunk-imutáveis) | Seções de chunk imutáveis | Aceita |
 | [011](#adr-011--sem-io-de-mundo-no-m0) | Sem I/O de mundo no M0 | Aceita |
 | [012](#adr-012--raknet-sans-io) | RakNet sans-io | Aceita |
+| [013](#adr-013--ring-para-criptografia) | `ring` para criptografia | Parcialmente superada por [014](#adr-014--p384-para-o-par-de-chaves-do-servidor) |
+| [014](#adr-014--p384-para-o-par-de-chaves-do-servidor) | `p384` para o par de chaves do servidor | Aceita |
 
 ---
 
@@ -352,3 +354,85 @@ poll_transmit() -> Option<datagrama>
 **O que nos faria mudar de ideia.** Se o driver acabar tão complexo que o bug migre para
 ele, a fronteira está no lugar errado. Sinal a observar: `bedrock-server` precisando
 replicar estado que já existe dentro de `Session`.
+
+---
+
+## ADR-013 — `ring` para criptografia
+
+**Contexto.** Até aqui o projeto tinha **zero dependências externas** em oito crates.
+Isso não foi acidente, mas também não é sustentável: o M0.3 precisa verificar
+assinaturas RS256, fazer acordo de chaves ECDH P-384 e cifrar um stream. Escrever
+qualquer uma dessas à mão é exatamente o que o [SECURITY.md](../SECURITY.md) proíbe.
+
+A escolha inicial foi RustCrypto, pelo argumento de que o `ring` não implementa
+AES-CFB8 — e o modo da cifra do Bedrock ainda não foi confirmado. Aí os números
+apareceram.
+
+**Medição.**
+
+| conjunto | crates transitivos |
+|---|---|
+| `ring` + `serde_json` + `base64` | **15** |
+| RustCrypto: `rsa` + `p384` + `sha2` | **49** |
+
+E o `rsa` do RustCrypto carrega a [RUSTSEC-2023-0071](https://rustsec.org/advisories/RUSTSEC-2023-0071.html)
+(Marvin attack), **aberta e sem correção**. Ela afeta operações com chave privada, e nós
+só verificamos com chave pública — mas o `cargo-deny` do nosso CI bloqueia merge, então
+usá-la exigiria silenciar uma advisory de segurança. Isso envelhece mal.
+
+**Decisão.** `ring` para verificação RSA e para o ECDH P-384. Se a cifra do Bedrock for
+CFB8, entram `aes` e `cfb8` do RustCrypto — que são crates pequenos, não os 49 acima (o
+número é dominado pelo `num-bigint-dig` do `rsa` e pela pilha `elliptic-curve` do `p384`).
+
+**Consequências.**
+- Positiva: um terço das dependências, e nenhuma advisory para silenciar.
+- Positiva: `ring` é assembly derivado do BoringSSL, auditado, e verificação de
+  assinatura é precisamente o que ele faz melhor.
+- Negativa: traz toolchain C na build. Os alvos do CI (x86-64 e aarch64) são suportados.
+- Negativa: se a cifra for CFB8, o projeto passa a ter duas famílias de cripto. Aceito —
+  são preocupações independentes, e a alternativa era escolher a família inteira apostando
+  num modo de cifra que ainda não medimos.
+- **Negativa: acabou a marca de zero dependências.** O `CONTRIBUTING.md` exige
+  justificativa por dependência nova; esta é a justificativa.
+
+**Correção registrada.** Eu havia recomendado RustCrypto neste projeto **antes de medir**,
+com base no argumento do CFB8. Medindo, o argumento não sobrevive: o escape do CFB8 custa
+poucos crates, e a diferença de footprint e de advisory é grande. A recomendação anterior
+estava errada.
+
+**O que nos faria mudar de ideia.** O `ring` ficar sem manutenção — nesse caso o
+`aws-lc-rs` é substituto quase drop-in.
+
+---
+
+## ADR-014 — `p384` para o par de chaves do servidor
+
+Supera a parte do [ADR-013](#adr-013--ring-para-criptografia) que dizia usar `ring`
+para o ECDH. A parte sobre verificação RSA continua valendo.
+
+**Contexto.** O `ServerToClientHandshake` é um JWT assinado cujo cabeçalho `x5u` carrega
+a chave pública do servidor. O cliente usa essa chave para **duas** coisas: verificar a
+assinatura do token e fazer o acordo ECDH. É obrigatoriamente a mesma chave — assinar
+com outra ou falha na verificação, ou é mentira sobre quem detém o quê.
+
+O `ring` não permite isso. O `EphemeralPrivateKey` do módulo `agreement` não pode ser
+importado nem exportado: o acesso ao escalar existe só sob `#[cfg(test)]`, marcado
+`#[deprecated]` e com o comentário `/// Do not use.` É recusa deliberada, e em geral é
+boa higiene — separar chave de assinatura de chave de acordo. Só que este protocolo
+exige o contrário.
+
+**Decisão.** O par de chaves P-384 do servidor vem do `p384` (RustCrypto), que faz ECDSA
+e ECDH a partir de um `SecretKey`. O `ring` permanece para verificação RSA do token de
+identidade e para SHA-256.
+
+**Consequências.**
+- Positiva: uma chave, usada como o protocolo manda, com teste provando que a assinatura
+  verifica sob a chave do acordo.
+- **Negativa: +30 crates.** De 15 para 45 na árvore. É o custo direto desta restrição.
+- Negativa: duas famílias de criptografia no projeto. Aceito — verificação RSA e par de
+  chaves são preocupações independentes, e trocar o `ring` pelo `rsa` do RustCrypto para
+  unificar traria de volta a advisory que o ADR-013 evitou.
+
+**Correção registrada.** O ADR-013 escolheu `ring` para o ECDH **sem verificar** se uma
+chave podia assinar e acordar. Não pode. A medição de footprint que motivou o ADR-013
+estava certa; a checagem de capacidade não foi feita.

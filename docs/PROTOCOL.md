@@ -172,12 +172,31 @@ O fluxo, na ordem em que acontece:
    que o **algoritmo de compressão é negociado** (zlib ou snappy, dependendo da versão)
    e o limiar de compressão é definido. Este passo acontece **antes** de qualquer
    criptografia. Errar isso faz todo o resto parecer corrompido.
-2. Cliente envia `Login`, contendo:
-   - uma **cadeia de JWTs** (`chain`) com a identidade do jogador, assinada em ES384.
-     A cadeia é validada até a chave pública raw da Mojang; a última entrada carrega o
-     `identityPublicKey` do cliente, o XUID e o nome de exibição.
-   - um JWT separado com os dados do cliente (skin, dispositivo, idioma), assinado pela
-     mesma chave.
+2. Cliente envia `Login`. **O formato não é o que a documentação de terceiros descreve.**
+   Capturado de um cliente real na versão 1001:
+
+   ```text
+   int32 BE   versão de protocolo do cliente
+   varint     tamanho do blob
+     int32 LE tamanho + JSON {"AuthenticationType":0,"Token":"<JWT RS256>"}
+     int32 LE tamanho + JWT ES384 com cabeçalho x5u
+   ```
+
+   O primeiro token é **RS256**, emitido pela autenticação da Microsoft, com claims
+   `xid`, `xname`, `cpk` (chave pública do cliente), `mid` (dispositivo), `tid`, `exp`.
+   Não é a "cadeia de três JWTs validada até a chave raiz da Mojang" que as
+   implementações antigas descrevem — aquilo é o formato anterior.
+
+   O segundo é **ES384** com a chave pública do cliente no cabeçalho `x5u`, e carrega
+   45 claims de dados do cliente.
+
+   **Tamanho importa:** o login capturado tinha **588 KB**, dos quais 96% eram skin
+   (`SkinData` 349 KB, `SkinGeometryData` 76 KB). Um login não é um pacote pequeno, e
+   isso tem consequência direta nos limites de remontagem por sessão.
+
+   **Isso é dado pessoal.** XUID, gamertag, id de dispositivo e a skin do jogador. Uma
+   captura de login não vai para repositório público — os fixtures deste projeto são
+   sintéticos, com o mesmo enquadramento e conteúdo falso.
 3. Servidor gera um par de chaves efêmero **ECDH P-384**, faz o acordo com a chave
    pública do cliente, e deriva a chave de sessão a partir do segredo compartilhado
    combinado com um `salt` aleatório (SHA-256).
@@ -197,6 +216,30 @@ O fluxo, na ordem em que acontece:
 - Se a validação da cadeia da Mojang será obrigatória por padrão (modo online) — ver
   [SECURITY.md](../SECURITY.md#2-handshake-e-autenticação).
 
+### Implementado
+
+- `NetworkSettings` respondendo com compressão desligada, confirmado contra cliente real.
+- `Login` decodificado, confirmado contra captura real.
+- Token de identidade verificado: RS256 contra as chaves publicadas em
+  `authorization.franchise.minecraft-services.net`, confirmado com token e chaves reais.
+- Acordo ECDH P-384 com a chave real do cliente, e o `ServerToClientHandshake` assinado
+  em ES384.
+
+**A mesma chave assina e acorda.** O cliente lê a chave pública do `x5u`, verifica a
+assinatura com ela, e faz o ECDH com ela. Isso descartou o `ring` para o par de chaves
+([ADR-014](DECISIONS.md#adr-014--p384-para-o-par-de-chaves-do-servidor)).
+
+### Ainda não confirmado
+
+Três coisas, e todas falham do mesmo jeito — o cliente deriva outra chave, não diz nada,
+e some:
+
+1. A fórmula de derivação `SHA-256(salt || segredo)`.
+2. O alfabeto base64 do `x5u` e do `salt` — padrão ou url-safe.
+3. O modo da cifra e a fórmula do contador por pacote.
+
+O `ClientToServerHandshake` chegando é o que confirma 1 e 2 de uma vez.
+
 ### Critério de conclusão da camada
 
 `ClientToServerHandshake` chega, descriptografa e valida. Teste de round-trip da cifra
@@ -206,19 +249,37 @@ com vetores fixos. Cadeia JWT inválida é rejeitada com erro tipado, não com p
 
 ## Camada 4 — Batch e compressão
 
-**Estado:** não iniciado. Baixo risco, mas fácil de errar sutilmente.
+**Estado:** enquadramento implementado e confirmado contra um cliente real. Compressão
+de verdade (zlib/snappy) ainda não — e por ora não precisa.
 
 Pacotes de jogo não vão sozinhos na rede. Vários são concatenados (cada um prefixado
-pelo seu tamanho em varint) num batch, o batch é comprimido, cifrado, e só então entregue
-ao RakNet como um payload com prefixo `0xFE`.
+pelo seu tamanho em varint) num batch entregue ao RakNet com prefixo `0xFE`.
 
-Pontos de atenção:
-- O algoritmo é o negociado em `NetworkSettings` — e existe um limiar abaixo do qual o
-  batch vai **sem compressão**, com um byte indicando isso. Ignorar o limiar funciona
-  no login e quebra depois.
-- zlib aqui é **raw deflate** (sem cabeçalho zlib). Usar a variante errada dá erro de
-  "invalid header" no cliente.
-- Limite de tamanho do batch descomprimido é obrigatório (bomba de descompressão).
+### Confirmado contra um cliente real (2026-07-30)
+
+**O formato do batch muda no meio do handshake.** Antes do `NetworkSettings`, os pacotes
+vêm direto após o marcador. Depois dele, existe um **byte de método** entre os dois — e
+ele existe mesmo quando o método é "sem compressão":
+
+```text
+antes    fe | varint len | pacote ...        fe 06 c1 01 00 00 03 e9
+depois   fe | método | varint len | pacote   fe ff f1 f1 23 01 00 00 03 e9 ...
+```
+
+`0xFF` é o método "nenhuma compressão", observado. Decodificar o segundo formato com o
+primeiro lê o `0xff` como comprimento e tudo depois vira lixo — sem erro, só lixo. Foi
+exatamente o que aconteceu na primeira tentativa aqui.
+
+**Responder `Compression::None` funciona.** O enum publicado pela Mojang tem três
+valores (`ZLib`, `Snappy`, `None`), e o cliente honrou o `None`: mandou o login inteiro
+sem compressão. Isso tira zlib e snappy do caminho crítico do M0.3 e elimina a
+adivinhação entre raw deflate e a variante com cabeçalho.
+
+**O `NetworkSettings` em si vai sem o byte de método.** A negociação vale a partir do
+próximo batch, nas duas direções.
+
+Falta ainda: limite de tamanho do batch descomprimido (bomba de descompressão) quando
+zlib/snappy entrarem.
 
 ---
 

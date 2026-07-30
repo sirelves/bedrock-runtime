@@ -13,3 +13,11 @@
 //! material are constant-time. See `SECURITY.md`.
 //!
 //! Status: not started. Milestone M0.3 — see `docs/ROADMAP.md`.
+
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
+pub mod agreement;
+pub mod cipher;
+pub mod handshake;
+pub mod jwt;
+pub mod probe;
