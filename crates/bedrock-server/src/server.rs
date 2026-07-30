@@ -16,6 +16,7 @@ use bedrock_protocol::handshake::{
     RequestNetworkSettings, server_to_client_handshake,
 };
 use bedrock_protocol::login::{self, ID_LOGIN, Login};
+use bedrock_protocol::play_status::{self, Status};
 use bedrock_protocol::version::{MINECRAFT_VERSION, PROTOCOL_VERSION};
 use bedrock_raknet::listener::{Event as RakEvent, Listener, ListenerConfig};
 use std::collections::{HashMap, HashSet};
@@ -62,6 +63,13 @@ pub enum Event {
     },
     /// A client accepted our handshake and switched to an encrypted stream.
     HandshakeAccepted(SocketAddr),
+    /// The server told a client where its login stands.
+    PlayStatusSent {
+        /// Who it went to.
+        peer: SocketAddr,
+        /// What it said.
+        status: Status,
+    },
     /// An encrypted packet decrypted and its checksum held.
     Decrypted {
         /// Who sent it.
@@ -112,6 +120,8 @@ pub struct Server {
     keys: HashMap<SocketAddr, ServerKey>,
     /// The encrypted stream, once a peer has one.
     ciphers: HashMap<SocketAddr, Cipher>,
+    /// The protocol version each peer declared at login.
+    protocols: HashMap<SocketAddr, u32>,
 }
 
 impl Server {
@@ -132,6 +142,7 @@ impl Server {
             settled: HashSet::new(),
             keys: HashMap::new(),
             ciphers: HashMap::new(),
+            protocols: HashMap::new(),
         }
     }
 
@@ -167,6 +178,7 @@ impl Server {
                     self.settled.remove(&peer);
                     self.keys.remove(&peer);
                     self.ciphers.remove(&peer);
+                    self.protocols.remove(&peer);
                     events.push(Event::Disconnected(peer));
                 }
                 RakEvent::Payload(peer, payload) => {
@@ -263,6 +275,7 @@ impl Server {
             }
         }
         self.keys.insert(peer, key);
+        self.protocols.insert(peer, login.client_protocol);
 
         vec![Event::LoginReceived {
             peer,
@@ -292,28 +305,58 @@ fn client_public_key(identity: &str) -> Option<Vec<u8>> {
 }
 
 impl Server {
+    /// Sends a batch through the peer's encrypted stream.
+    ///
+    /// The batch marker stays in the clear — it is how the receiver recognises the
+    /// payload at all — and everything after it is encrypted.
+    fn send_encrypted(&mut self, peer: SocketAddr, packets: &[batch::Packet], now: Instant) {
+        let framed = batch::encode_with_method(packets);
+        let Some(body) = framed.strip_prefix(&[batch::MARKER]) else {
+            return;
+        };
+        let Some(cipher) = self.ciphers.get_mut(&peer) else {
+            return;
+        };
+
+        let mut payload = vec![batch::MARKER];
+        payload.extend_from_slice(&cipher.encrypt(body));
+        let _ = self.listener.send(peer, payload, now);
+    }
+
     /// Handles packets that came out of the encrypted stream.
-    fn on_plaintext(&mut self, peer: SocketAddr, plaintext: &[u8], _now: Instant) -> Vec<Event> {
+    fn on_plaintext(&mut self, peer: SocketAddr, plaintext: &[u8], now: Instant) -> Vec<Event> {
         let Ok(packets) = batch::decode_packets(bedrock_protocol::bytes::Reader::new(
             plaintext.get(1..).unwrap_or_default(),
         )) else {
             return vec![Event::Undecodable(peer, plaintext.to_vec())];
         };
 
-        packets
-            .into_iter()
-            .map(|packet| {
-                if packet.id == ID_CLIENT_TO_SERVER_HANDSHAKE {
-                    Event::HandshakeAccepted(peer)
-                } else {
-                    Event::Decrypted {
-                        peer,
-                        id: packet.id,
-                        len: packet.body.len(),
-                    }
-                }
-            })
-            .collect()
+        let mut events = Vec::new();
+        for packet in packets {
+            if packet.id == ID_CLIENT_TO_SERVER_HANDSHAKE {
+                events.push(Event::HandshakeAccepted(peer));
+
+                // The verdict names the side that is behind, so a mismatched player is
+                // told to update the right thing instead of watching a blank screen.
+                let declared = self
+                    .protocols
+                    .get(&peer)
+                    .copied()
+                    .unwrap_or(TARGET_PROTOCOL);
+                let status = Status::for_version_mismatch(declared, TARGET_PROTOCOL)
+                    .unwrap_or(Status::LoginSuccess);
+
+                self.send_encrypted(peer, &[play_status::packet(status)], now);
+                events.push(Event::PlayStatusSent { peer, status });
+            } else {
+                events.push(Event::Decrypted {
+                    peer,
+                    id: packet.id,
+                    len: packet.body.len(),
+                });
+            }
+        }
+        events
     }
 }
 
