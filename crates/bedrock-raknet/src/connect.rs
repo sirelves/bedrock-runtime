@@ -15,10 +15,17 @@
 //! A protocol version mismatch is answered with [`IncompatibleProtocolVersion`], which
 //! carries the version the server does speak — the protocol tells you how to talk to
 //! it, so the probe asks instead of assuming.
+//!
+//! # The advertised MTU is not a payload size
+//!
+//! It includes the IPv4 and UDP headers. Probing one server at 1492, 1400, 1200 and
+//! 576 came back as 1520, 1428, 1228 and 604 — [`UDP_IP_OVERHEAD`] more, every time.
+//! Use [`payload_limit`] rather than the advertised number, or every full-size
+//! datagram goes out 28 bytes over and gets fragmented or dropped on a real path.
 
 use crate::address;
 use crate::wire::{DecodeError, Reader, Writer};
-use crate::{MAGIC, MAX_MTU};
+use crate::{MAGIC, MAX_MTU, UDP_IP_OVERHEAD};
 use std::fmt;
 use std::net::SocketAddr;
 
@@ -206,11 +213,14 @@ pub fn decode_incompatible(buf: &[u8]) -> Result<IncompatibleProtocolVersion, Co
     })
 }
 
-/// MTU sizes to probe, largest first.
-///
-/// A server answers with the size of the largest request 1 that reached it, so the
-/// walk down exists for paths that silently drop anything bigger.
+/// UDP payload sizes to probe, largest first. The walk down exists for paths that
+/// silently drop anything bigger.
 pub const MTU_LADDER: [usize; 3] = [MAX_MTU, 1200, 576];
+
+/// Largest datagram we may actually build, given an advertised MTU.
+pub fn payload_limit(advertised_mtu: u16) -> usize {
+    usize::from(advertised_mtu).saturating_sub(UDP_IP_OVERHEAD)
+}
 
 #[cfg(test)]
 mod tests {
@@ -224,6 +234,20 @@ mod tests {
             assert_eq!(buf[0], ID_OPEN_CONNECTION_REQUEST_1);
             assert_eq!(buf[17], PROTOCOL_VERSION);
         }
+    }
+
+    /// Measured against a live server: probes of 1492/1400/1200/576 were answered
+    /// with 1520/1428/1228/604.
+    #[test]
+    fn payload_limit_strips_the_headers() {
+        for (probed, advertised) in [(1492, 1520), (1400, 1428), (1200, 1228), (576, 604)] {
+            assert_eq!(payload_limit(advertised), probed);
+        }
+    }
+
+    #[test]
+    fn payload_limit_does_not_underflow() {
+        assert_eq!(payload_limit(10), 0);
     }
 
     #[test]

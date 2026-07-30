@@ -1,9 +1,12 @@
 //! Socket addresses on the wire: `u8` version tag, then for IPv4 four
 //! **bitwise-complemented** octets and a big-endian port.
 //!
-//! The complement is a RakNet quirk, and it is the reason a misread address looks
-//! plausible instead of obviously broken: the two candidate readings are complements
-//! of each other. Treat any decoded remote address as a claim by a peer about itself.
+//! The complement is a RakNet quirk, confirmed on 2026-07-30 by comparing the address
+//! a live server reported for us against our real public address — the complemented
+//! reading matched, the raw one did not. It matters because a misread address looks
+//! plausible rather than broken: the two readings are complements of each other.
+//!
+//! Treat any decoded remote address as a claim by a peer about itself.
 //!
 //! IPv6 is not decoded. Its RakNet layout is a dump of a platform `sockaddr_in6` and
 //! varies with where the peer was compiled; [`AddressError::UnsupportedVersion`] says
@@ -69,8 +72,8 @@ pub fn read(r: &mut Reader<'_>) -> Result<SocketAddr, AddressError> {
     read_inner(r, true)
 }
 
-/// Reads an address without complementing the octets, so a probe can show both
-/// readings while the quirk is still being confirmed against real traffic.
+/// Reads an address without complementing the octets. For probes comparing readings
+/// on a capture; the server has no reason to call this.
 pub fn read_raw(r: &mut Reader<'_>) -> Result<SocketAddr, AddressError> {
     read_inner(r, false)
 }
