@@ -15,6 +15,17 @@
 //! `is_logging_chat` boolean the schema does not list, and the server join information
 //! is optional rather than a fixed field.
 //!
+//! # Values, not just layout
+//!
+//! Four booleans here select between client subsystems rather than describing the
+//! world: server-authoritative block breaking, the new inventory system, client sound
+//! handling and chat logging. A reference server pinned to this protocol sends all four
+//! as true. Sending false asks the client for code paths that a version which only
+//! knows the new ones may no longer have.
+//!
+//! Matching the field layout is not enough when a field chooses which half of the
+//! client runs.
+//!
 //! # Encodings that are easy to get wrong
 //!
 //! Most integers here are varints, but not all of them. `server_chunk_tick_radius`,
@@ -180,7 +191,9 @@ impl StartGame {
             .prefixed(b"") // premium world template id
             .u8(0); // is trial
 
-        w.zigzag32(0).u8(0); // movement settings: rewind history, server-auth breaking
+        // Rewind history, then server-authoritative block breaking. True: the client
+        // half that expects the server to arbitrate is the half still maintained.
+        w.zigzag32(0).u8(1);
 
         w.u64(0); // current tick
         w.zigzag32(0); // enchantment seed
@@ -191,7 +204,7 @@ impl StartGame {
         w.varint(0);
 
         w.prefixed(b"") // multiplayer correlation id
-            .u8(0) // item stack net manager
+            .u8(1) // new inventory system
             .prefixed(self.server_version.as_bytes())
             .bytes(&EMPTY_NBT); // player property data
 
@@ -200,8 +213,8 @@ impl StartGame {
 
         w.u8(0) // client-side chunk generation
             .u8(0) // block network ids are hashes
-            .u8(0) // network permissions: client sounds not disabled
-            .u8(0); // is logging chat
+            .u8(1) // network permissions: client sounds disabled
+            .u8(1); // is logging chat
 
         w.u8(0); // server join information: absent
 

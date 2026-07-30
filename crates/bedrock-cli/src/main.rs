@@ -257,8 +257,8 @@ fn parse_args() -> Result<Option<Options>, Box<dyn Error>> {
             "--dump" => options.dump = Some(args.next().ok_or("--dump needs a value")?),
             "--stop-after" => {
                 let name = args.next().ok_or("--stop-after needs a value")?;
-                options.stage =
-                    Stage::parse(&name).ok_or("--stop-after: world, radius, chunks or spawn")?;
+                options.stage = Stage::parse(&name)
+                    .ok_or("--stop-after: start-game, world, radius, chunks or spawn")?;
             }
             other => {
                 eprintln!("unknown argument: {other}");
@@ -282,7 +282,7 @@ OPTIONS:
     --name <NAME>    Name shown in the client's server list
     --dump <DIR>     Write unhandled packets there, for protocol work
     --stop-after <STAGE>
-                     Stop the login sequence early: world, radius, chunks, spawn.
+                     Stop early: start-game, world, radius, chunks, spawn.
                      For bisecting a client that closes on a malformed packet.
     -h, --help       Print this message
     -V, --version    Print the version
