@@ -66,9 +66,17 @@ UDP não tem handshake de transporte, então qualquer um pode alegar ser qualque
 - Custo de manter uma sessão pré-autenticação mantido mínimo — nenhuma alocação grande
   antes de o cliente provar identidade.
 - Rate limit de pacotes por sessão.
-- **Amplificação:** nenhuma resposta a pacote não solicitado pode ser maior que o pacote
-  recebido. Isso restringe o tamanho do payload de `UnconnectedPong` e é requisito de
-  design, não configuração.
+- **Amplificação.** Uma versão anterior deste documento exigia que nenhuma resposta a
+  pacote não solicitado fosse maior que o pacote recebido. Isso é inatingível: o
+  `UnconnectedPing` tem 33 bytes e um pong com MOTD utilizável passa de 100. A exigência
+  estava errada, não a implementação.
+
+  O que é atingível, e está implementado: **limitar o fator** de amplificação (o tamanho
+  do anúncio é truncado por configuração) e **limitar a taxa** por endereço de origem. O
+  rate limit vale só para o ping, porque só ele amplifica — o `OpenConnectionRequest1`
+  chega preenchido até o MTU e recebe 28 bytes de volta, o que é o contrário de
+  amplificação. Limitar a sequência de abertura, aliás, quebra o handshake legítimo: os
+  requests 1 e 2 chegam colados.
 - **Cookie na abertura de conexão.** O RakNet moderno responde ao `OpenConnectionRequest1`
   com um cookie que o cliente precisa devolver no request 2. Um endereço de origem forjado
   nunca recebe o cookie, então não avança — é o que impede o servidor de ser usado como
