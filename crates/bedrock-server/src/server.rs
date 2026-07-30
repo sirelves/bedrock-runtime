@@ -36,6 +36,36 @@ use std::time::Instant;
 /// Default UDP port, from the transport.
 pub const DEFAULT_PORT: u16 = bedrock_raknet::DEFAULT_PORT_V4;
 
+/// How far the login sequence is allowed to run.
+///
+/// A client that closes on a malformed packet says nothing about which packet. Stopping
+/// the sequence early and seeing whether it still closes splits the suspects in half,
+/// and costs one connection instead of one guess.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Stage {
+    /// Stop after `StartGame` and the registries.
+    World,
+    /// Stop after granting a chunk radius.
+    Radius,
+    /// Stop after streaming columns, without telling the client to spawn.
+    Chunks,
+    /// Run the whole sequence.
+    Spawn,
+}
+
+impl Stage {
+    /// Parses a stage name.
+    pub fn parse(name: &str) -> Option<Self> {
+        Some(match name {
+            "world" => Self::World,
+            "radius" => Self::Radius,
+            "chunks" => Self::Chunks,
+            "spawn" => Self::Spawn,
+            _ => return None,
+        })
+    }
+}
+
 /// How far this server streams chunks, in chunks.
 ///
 /// Small on purpose while there is no world to stream: granting a radius the server
@@ -177,6 +207,8 @@ pub struct Server {
     protocols: HashMap<SocketAddr, u32>,
     /// What the world calls itself in the client.
     world_name: String,
+    /// How far the login sequence runs before stopping.
+    stage: Stage,
     /// The issuer's published keys, and when they were set. Empty until the caller
     /// supplies them, and a login cannot be verified without them.
     identity_keys: Option<Jwks>,
@@ -201,6 +233,7 @@ impl Server {
         Self {
             listener: Listener::new(local, guid, advertisement, config),
             world_name: "bedrock-runtime".to_owned(),
+            stage: Stage::Spawn,
             settled: HashSet::new(),
             keys: HashMap::new(),
             ciphers: HashMap::new(),
@@ -242,6 +275,11 @@ impl Server {
         let (anchor_unix, anchor) = self.clock?;
         let elapsed = i64::try_from(now.saturating_duration_since(anchor).as_secs()).ok()?;
         Some(anchor_unix + elapsed)
+    }
+
+    /// Stops the login sequence early, for bisecting a client that closes on a packet.
+    pub fn set_stage(&mut self, stage: Stage) {
+        self.stage = stage;
     }
 
     /// Peers currently connected or connecting.
@@ -446,7 +484,9 @@ impl Server {
             self.send_encrypted(peer, &[level_chunk::level_chunk(x, z, &payload)], now);
         }
 
-        self.send_encrypted(peer, &[play_status::packet(Status::PlayerSpawn)], now);
+        if self.stage >= Stage::Spawn {
+            self.send_encrypted(peer, &[play_status::packet(Status::PlayerSpawn)], now);
+        }
 
         Event::Spawned {
             peer,
@@ -546,7 +586,9 @@ impl Server {
                         requested: request.radius,
                         granted,
                     });
-                    events.push(self.stream_world(peer, granted, now));
+                    if self.stage >= Stage::Chunks {
+                        events.push(self.stream_world(peer, granted, now));
+                    }
                 }
             } else if packet.id == ID_SERVERBOUND_LOADING_SCREEN {
                 // The client narrating its own loading screen. Nothing is expected back.

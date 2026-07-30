@@ -5,6 +5,7 @@
 //!
 //! Game logic in this crate is a bug.
 
+use bedrock_server::server::Stage;
 use bedrock_server::server::{
     DEFAULT_PORT, Event, Jwks, Server, TARGET_PROTOCOL, TOKEN_KEYS_URL, advertisement,
 };
@@ -26,6 +27,7 @@ struct Options {
     port: u16,
     name: String,
     dump: Option<String>,
+    stage: Stage,
 }
 
 /// Fetches the issuer's signing keys.
@@ -55,12 +57,16 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let advertisement = advertisement(&options.name, 0, 10, options.port, GUID);
     let mut server = Server::new(local, GUID, &advertisement);
+    server.set_stage(options.stage);
 
     println!("bedrock-runtime {}", env!("CARGO_PKG_VERSION"));
     println!("listening on  {local}");
     println!("advertising   {advertisement}");
     if let Some(dir) = &options.dump {
         println!("capturing to  {dir}");
+    }
+    if options.stage != Stage::Spawn {
+        println!("parando em    {:?}  (bisseccao)", options.stage);
     }
     println!("ctrl-c to stop\n");
 
@@ -232,6 +238,7 @@ fn parse_args() -> Result<Option<Options>, Box<dyn Error>> {
         port: DEFAULT_PORT,
         name: "bedrock-runtime".to_owned(),
         dump: None,
+        stage: Stage::Spawn,
     };
     let mut args = std::env::args().skip(1);
 
@@ -248,6 +255,11 @@ fn parse_args() -> Result<Option<Options>, Box<dyn Error>> {
             "--port" => options.port = args.next().ok_or("--port needs a value")?.parse()?,
             "--name" => options.name = args.next().ok_or("--name needs a value")?,
             "--dump" => options.dump = Some(args.next().ok_or("--dump needs a value")?),
+            "--stop-after" => {
+                let name = args.next().ok_or("--stop-after needs a value")?;
+                options.stage =
+                    Stage::parse(&name).ok_or("--stop-after: world, radius, chunks or spawn")?;
+            }
             other => {
                 eprintln!("unknown argument: {other}");
                 print_help();
@@ -269,6 +281,9 @@ OPTIONS:
     --port <PORT>    UDP port to bind (default {DEFAULT_PORT})
     --name <NAME>    Name shown in the client's server list
     --dump <DIR>     Write unhandled packets there, for protocol work
+    --stop-after <STAGE>
+                     Stop the login sequence early: world, radius, chunks, spawn.
+                     For bisecting a client that closes on a malformed packet.
     -h, --help       Print this message
     -V, --version    Print the version
 
