@@ -25,6 +25,7 @@ pub mod datagram;
 pub mod frame;
 pub mod offline;
 pub mod online;
+pub mod retransmit;
 pub mod split;
 pub mod wire;
 
