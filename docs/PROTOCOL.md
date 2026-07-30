@@ -40,9 +40,9 @@ observável — não dá para pular etapas, e é isso que define a ordem do M0.
 
 ## Camada 2 — RakNet
 
-**Estado:** fase offline, abertura de conexão e fase conectada implementadas e
-confirmadas contra um servidor real. Faltam fragmentação/remontagem, retransmissão e a
-máquina de estado da sessão.
+**Estado:** codec completo — fase offline, abertura de conexão, fase conectada,
+fragmentação e retransmissão. Falta a máquina de estado da sessão que junta tudo, e o
+lado servidor.
 
 RakNet é um protocolo de confiabilidade sobre UDP, originalmente uma biblioteca C++ de
 propósito geral para jogos. O Bedrock usa uma variante dele. Não existe implementação
@@ -71,9 +71,10 @@ madura em Rust — este é código próprio.
 - ACK / NACK com ranges de sequência. ✅
 - `ConnectedPing` / `ConnectedPong`, `ConnectionRequest`, `ConnectionRequestAccepted`,
   `NewIncomingConnection`, `Disconnect`. ✅
-- Fragmentação e remontagem com `split_id`/`split_index`/`split_count`. **Falta.**
-- Retransmissão por RTO estimado a partir do RTT, e a máquina de estado da sessão.
-  **Falta.**
+- Fragmentação e remontagem com `split_id`/`split_index`/`split_count`, com limites por
+  sessão e expiração. ✅
+- Retransmissão por RTO estimado do RTT (RFC 6298, com Karn). ✅
+- Máquina de estado da sessão e o socket que junta tudo. **Falta.**
 
 ### Confirmado contra tráfego real (2026-07-30)
 
@@ -126,15 +127,27 @@ mesma coisa; quem conhecer só uma lê a outra como endereço roteável.
 e a resposta espelha a contagem recebida.
 
 **Ranges de ACK ficam ranges.** Um único record pode reivindicar 16 milhões de números de
-sequência; expandir isso numa lista é negação de serviço com um pacote.
+sequência; expandir isso numa lista é negação de serviço com um pacote. Pelo mesmo motivo,
+limpar os datagramas confirmados percorre o que temos em mãos, não o intervalo anunciado.
+
+**A remontagem é onde o peer escolhe o tamanho da nossa alocação.** Cada limite existe
+por um ataque específico: contagem absurda de fragmentos, um split id aberto por vez sem
+nunca fechar, fragmentos que nunca completam um payload, e o peer que simplesmente para
+de falar. Os fragmentos ficam num mapa indexado, não num vetor dimensionado pela contagem
+anunciada.
 
 ### Riscos concretos
 
 - **Remontagem de fragmentos é superfície de ataque.** Um cliente pode anunciar
   `split_count` enorme e nunca enviar os fragmentos. Limite de memória por sessão e
   timeout de remontagem são requisito, não otimização.
-- **Retransmissão mal calibrada mata o desempenho antes do jogo existir.** RTO fixo é
-  aceitável para fechar o M0; RTO adaptativo entra no M2, com os números na mão.
+- **Retransmissão mal calibrada mata o desempenho antes do jogo existir.** Uma versão
+  anterior deste documento dizia que RTO fixo bastava para o M0 e que o adaptativo
+  esperaria o M2. Estava errado: RTO fixo é maior ou menor que o link, e os dois casos
+  doem — longo demais trava segundos após uma única perda, curto demais inunda um
+  caminho lento de duplicatas e piora o congestionamento a que está reagindo. O
+  estimador do RFC 6298 são vinte linhas de um padrão de trinta anos, não uma
+  otimização. Implementado, com o algoritmo de Karn.
 - **A ordem de janela de ordenação é por canal.** Misturar canais é fonte comum de
   travamento silencioso.
 
