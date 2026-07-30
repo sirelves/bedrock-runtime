@@ -20,6 +20,7 @@ use bedrock_protocol::handshake::{
     ID_CLIENT_TO_SERVER_HANDSHAKE, ID_REQUEST_NETWORK_SETTINGS, NetworkSettings,
     RequestNetworkSettings, server_to_client_handshake,
 };
+use bedrock_protocol::level_chunk::{self, BIOME_PLAINS};
 use bedrock_protocol::login::{self, ID_LOGIN, Login, TOKEN_AUDIENCE, TOKEN_ISSUER};
 use bedrock_protocol::play_status::{self, Status};
 use bedrock_protocol::resource_packs::{self, ID_RESOURCE_PACK_CLIENT_RESPONSE, Response};
@@ -105,6 +106,13 @@ pub enum Event {
     ReadyForWorld(SocketAddr),
     /// `StartGame` went out.
     WorldSent(SocketAddr),
+    /// The world was streamed and the player told it may spawn.
+    Spawned {
+        /// Who spawned.
+        peer: SocketAddr,
+        /// How many columns went out.
+        columns: usize,
+    },
     /// The client asked for a view distance and was answered.
     ChunkRadiusGranted {
         /// Who asked.
@@ -412,6 +420,39 @@ impl Server {
 }
 
 impl Server {
+    /// Sends the world around spawn, then tells the client it may appear in it.
+    ///
+    /// The publisher update goes first: it names the point the client accepts columns
+    /// around, and without it the columns are discarded however many are sent.
+    ///
+    /// `PlayStatus` goes last, after the columns. Telling a client to spawn into a
+    /// world it has not received is how it ends up standing in nothing.
+    fn stream_world(&mut self, peer: SocketAddr, radius: i32, now: Instant) -> Event {
+        self.send_encrypted(
+            peer,
+            &[level_chunk::publisher_update(
+                0,
+                70,
+                0,
+                radius.max(0) as u32,
+            )],
+            now,
+        );
+
+        let payload = level_chunk::void_column(BIOME_PLAINS);
+        let columns = level_chunk::columns_around(0, 0, radius);
+        for &(x, z) in &columns {
+            self.send_encrypted(peer, &[level_chunk::level_chunk(x, z, &payload)], now);
+        }
+
+        self.send_encrypted(peer, &[play_status::packet(Status::PlayerSpawn)], now);
+
+        Event::Spawned {
+            peer,
+            columns: columns.len(),
+        }
+    }
+
     /// Sends a batch through the peer's encrypted stream.
     ///
     /// The batch marker stays in the clear — it is how the receiver recognises the
@@ -495,6 +536,7 @@ impl Server {
                         requested: request.radius,
                         granted,
                     });
+                    events.push(self.stream_world(peer, granted, now));
                 }
             } else if packet.id == ID_SERVERBOUND_LOADING_SCREEN {
                 // The client narrating its own loading screen. Nothing is expected back.

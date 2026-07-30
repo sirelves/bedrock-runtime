@@ -23,6 +23,7 @@ pub mod batch;
 pub mod bytes;
 pub mod chunk_radius;
 pub mod handshake;
+pub mod level_chunk;
 pub mod login;
 pub mod play_status;
 pub mod resource_packs;
