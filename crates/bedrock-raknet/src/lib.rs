@@ -21,6 +21,7 @@
 pub mod address;
 pub mod advertisement;
 pub mod connect;
+pub mod datagram;
 pub mod frame;
 pub mod offline;
 pub mod wire;
