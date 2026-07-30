@@ -84,8 +84,9 @@ ao código é o que torna atualização de versão dolorosa em outros projetos.
 | macOS (Apple Silicon) | desenvolvimento; sem garantia de produção |
 | Windows | não testado, sem suporte |
 
-MSRV (versão mínima do Rust) está em `rust-toolchain.toml`. Aumentar a MSRV é mudança
-menor de versão, não maior.
+A versão do Rust está fixada em `rust-toolchain.toml` e é a única testada em CI. Não há
+compromisso de MSRV: prometer uma faixa de versões que ninguém verifica é pior do que
+não prometer nada.
 
 ## Clientes
 

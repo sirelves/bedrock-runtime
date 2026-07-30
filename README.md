@@ -25,9 +25,10 @@ o protocolo implementado a partir de observação e das referências listadas em
 
 | Componente | Estado |
 |---|---|
-| Transporte RakNet | não iniciado |
+| Transporte RakNet | fase offline decodifica; conexão não iniciada |
 | Handshake / criptografia | não iniciado |
 | Codec de pacotes | não iniciado |
+| Versão-alvo | `1.26.30`, protocolo `1001` ([procedência](docs/COMPATIBILITY.md#versão-alvo)) |
 | Mundo e chunks | não iniciado |
 | Persistência | fora do M0 ([ADR-011](docs/DECISIONS.md#adr-011--sem-io-de-mundo-no-m0)) |
 | API de plugins | apenas contrato, e opcional ([PLUGIN_API.md](docs/PLUGIN_API.md)) |
