@@ -94,6 +94,17 @@ impl<'a> Reader<'a> {
     pub fn i64(&mut self) -> Result<i64> {
         Ok(i64::from_be_bytes(self.array()?))
     }
+
+    /// Reads a 24-bit **little-endian** integer.
+    ///
+    /// The one place RakNet flips endianness: datagram sequence numbers and the
+    /// reliability indices are 24-bit little-endian while everything around them is
+    /// big-endian. Reading these as big-endian produces numbers that look almost
+    /// plausible, which is worse than numbers that look wrong.
+    pub fn u24(&mut self) -> Result<u32> {
+        let b = self.array::<3>()?;
+        Ok(u32::from(b[0]) | u32::from(b[1]) << 8 | u32::from(b[2]) << 16)
+    }
 }
 
 /// A growable buffer for building a datagram.
@@ -120,10 +131,46 @@ impl Writer {
         self
     }
 
+    /// Appends a big-endian `u16`.
+    pub fn u16(&mut self, v: u16) -> &mut Self {
+        self.buf.extend_from_slice(&v.to_be_bytes());
+        self
+    }
+
+    /// Appends a 24-bit **little-endian** integer.
+    ///
+    /// Only the low 24 bits are written. That is not truncation papering over a bug:
+    /// RakNet sequence numbers are 24-bit and wrap at 2^24 by design, so the caller
+    /// counting past that is expected.
+    pub fn u24(&mut self, v: u32) -> &mut Self {
+        self.buf
+            .extend_from_slice(&[v as u8, (v >> 8) as u8, (v >> 16) as u8]);
+        self
+    }
+
     /// Appends raw bytes.
     pub fn bytes(&mut self, v: &[u8]) -> &mut Self {
         self.buf.extend_from_slice(v);
         self
+    }
+
+    /// Appends `count` zero bytes.
+    ///
+    /// Used to pad `OpenConnectionRequest1` up to the MTU being probed — the size of
+    /// that datagram *is* the question being asked.
+    pub fn zeros(&mut self, count: usize) -> &mut Self {
+        self.buf.resize(self.buf.len() + count, 0);
+        self
+    }
+
+    /// How many bytes have been written so far.
+    pub fn len(&self) -> usize {
+        self.buf.len()
+    }
+
+    /// Whether nothing has been written yet.
+    pub fn is_empty(&self) -> bool {
+        self.buf.is_empty()
     }
 
     /// Consumes the writer and yields the datagram.
@@ -175,6 +222,47 @@ mod tests {
     fn huge_length_does_not_overflow() {
         let mut r = Reader::new(&[0u8; 4]);
         assert!(r.bytes(usize::MAX).is_err());
+    }
+
+    #[test]
+    fn u24_is_little_endian() {
+        // 0x00563412 little-endian is 12 34 56 — the same bytes read big-endian would
+        // be 0x123456, so this test fails loudly if the endianness ever flips.
+        let mut r = Reader::new(&[0x12, 0x34, 0x56]);
+        assert_eq!(r.u24().unwrap(), 0x0056_3412);
+    }
+
+    #[test]
+    fn u24_round_trips_across_its_whole_range() {
+        for v in [0, 1, 255, 256, 0xff_ffff] {
+            let mut w = Writer::new();
+            w.u24(v);
+            let buf = w.finish();
+            assert_eq!(buf.len(), 3);
+            assert_eq!(Reader::new(&buf).u24().unwrap(), v, "value {v}");
+        }
+    }
+
+    /// Sequence numbers wrap at 2^24; writing past it keeps the low bits rather than
+    /// failing, because wrapping is the protocol's behaviour and not a caller error.
+    #[test]
+    fn u24_keeps_the_low_bits() {
+        let mut w = Writer::new();
+        w.u24(0x0100_0001);
+        assert_eq!(Reader::new(&w.finish()).u24().unwrap(), 1);
+    }
+
+    #[test]
+    fn u24_short_read_fails() {
+        assert!(Reader::new(&[0x01, 0x02]).u24().is_err());
+    }
+
+    #[test]
+    fn zeros_pads_to_a_target_size() {
+        let mut w = Writer::new();
+        w.u8(0x05).zeros(10);
+        assert_eq!(w.len(), 11);
+        assert_eq!(w.finish()[1..], [0u8; 10]);
     }
 
     #[test]
