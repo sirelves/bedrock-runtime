@@ -1,9 +1,8 @@
 [package]
 name = "bedrock-crypto"
-description = "Bedrock login chain, key agreement, stream cipher and batch compression."
+description = "Session cryptography: key agreement, key derivation, stream cipher. Primitives only."
 version.workspace = true
 edition.workspace = true
-rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true

@@ -3,6 +3,10 @@
 version = 4
 
 [[package]]
+name = "bedrock-blocks"
+version = "0.0.0"
+
+[[package]]
 name = "bedrock-cli"
 version = "0.0.0"
 dependencies = [
@@ -21,6 +25,7 @@ version = "0.0.0"
 name = "bedrock-protocol"
 version = "0.0.0"
 dependencies = [
+ "bedrock-blocks",
  "bedrock-nbt",
 ]
 
@@ -32,6 +37,7 @@ version = "0.0.0"
 name = "bedrock-server"
 version = "0.0.0"
 dependencies = [
+ "bedrock-blocks",
  "bedrock-crypto",
  "bedrock-protocol",
  "bedrock-raknet",
@@ -42,5 +48,6 @@ dependencies = [
 name = "bedrock-world"
 version = "0.0.0"
 dependencies = [
+ "bedrock-blocks",
  "bedrock-nbt",
 ]

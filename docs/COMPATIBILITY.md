@@ -88,14 +88,17 @@ menor de versão, não maior.
 
 ## Mundos
 
-Se o formato em disco será compatível com mundos criados pelo Minecraft vanilla é
-**decisão em aberto**, a ser resolvida no [M2](ROADMAP.md#m2--servidor-sustentável) com
-um ADR próprio.
+**Compatibilidade com mundos criados pelo Minecraft vanilla está fora de escopo.**
 
-O trade-off, resumido: compatibilidade significa implementar o formato LevelDB do Bedrock
-com todas as suas particularidades de chave e serialização — trabalho considerável — em
-troca de os usuários poderem trazer mundos existentes. Formato próprio é muito mais
-barato e fecha essa porta.
+Isso significa implementar o formato LevelDB do Bedrock, com suas particularidades de
+chave e de serialização por subchunk, mais uma dependência C++ — trabalho da ordem de
+grandeza do RakNet, em troca de um benefício (importar mundo existente) que não ajuda em
+nada a provar a tese do projeto ([ROADMAP.md](ROADMAP.md#o-que-o-projeto-está-tentando-provar)).
 
-Até que essa decisão exista, **nenhum mundo produzido por este servidor deve ser
-considerado migrável**.
+O armazenamento é **formato próprio**, desenhado no [M1](ROADMAP.md#m1--multiplayer-e-persistência)
+em cima da representação de chunk em memória que o M0 já terá estabilizado. No M0 não
+existe armazenamento nenhum: o mundo é gerado em memória
+([ADR-011](DECISIONS.md#adr-011--sem-io-de-mundo-no-m0)).
+
+Um mundo produzido por este servidor não abre no Minecraft, e um mundo do Minecraft não
+abre aqui. Isso é decisão, não limitação temporária.

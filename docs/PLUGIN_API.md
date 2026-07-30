@@ -98,10 +98,18 @@ interface Events {
   "player.join":        { player: PlayerRef };
   "player.leave":       { player: PlayerRef; reason: string };
   "player.chat":        Cancellable<{ player: PlayerRef; message: string }>;
-  "block.break":        Cancellable<{ player: PlayerRef; pos: BlockPos; block: BlockRef }>;
-  "block.place":        Cancellable<{ player: PlayerRef; pos: BlockPos; block: BlockRef }>;
+  "block.break":        Cancellable<BlockEvent>;
+  "block.place":        Cancellable<BlockEvent>;
   "player.move":        { player: PlayerRef; from: Vec3; to: Vec3 };  // amostrado, não por tick
   "server.tick":        { tick: number };                             // baixa frequência
+}
+
+interface BlockEvent {
+  player: PlayerRef;
+  pos: BlockPos;
+  block: BlockRef;
+  /** Vizinhos imediatos, já carregados. Ver "cancelamento é síncrono" abaixo. */
+  neighbors: Readonly<Record<Face, BlockRef>>;
 }
 
 type Cancellable<T> = T & { cancel(): void };
@@ -115,8 +123,17 @@ Notas de design:
 - **`server.tick` não é 20 Hz.** É um gancho de baixa frequência para manutenção. Plugin
   que precisa de lógica a cada tick está resolvendo o problema errado ou deveria ser
   código do servidor.
-- **Cancelamento é síncrono e imediato.** Um handler que cancela precisa fazê-lo dentro
-  do orçamento; cancelar depois não é possível.
+- **Cancelamento é síncrono, e por isso o evento vem com contexto pré-carregado.** Um
+  handler cancelável roda dentro do tick e precisa responder ali — não pode dar `await`
+  em `world.getBlock()`, que é assíncrono porque o chunk pode não estar carregado. Se o
+  evento só trouxesse a posição, todo plugin que precisa olhar o bloco vizinho estaria
+  travado. Então o servidor carrega os vizinhos antes de emitir o evento, e o handler
+  decide com o que já tem na mão.
+
+  O custo dessa escolha é real e fica registrado: o servidor paga o carregamento dos
+  vizinhos mesmo quando nenhum plugin usa. A alternativa — deixar o handler ser
+  assíncrono — transformaria cancelamento em "aplicar e reverter", que é pior de raciocinar
+  e pior de sincronizar com o cliente.
 
 ## Comandos
 

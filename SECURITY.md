@@ -31,9 +31,9 @@ isso.
 
 ### Superfícies, por ordem de risco
 
-**1. Decodificação de pacotes (`bedrock-raknet`, `bedrock-protocol`, `bedrock-nbt`)**
+#### 1. Decodificação de pacotes
 
-A superfície mais exposta do projeto: código que processa bytes de quem ainda não provou
+Em `bedrock-raknet`, `bedrock-protocol` e `bedrock-nbt`. A superfície mais exposta do projeto: código que processa bytes de quem ainda não provou
 ser ninguém. Requisitos, não recomendações:
 
 - Nenhum `unwrap`, `expect` ou `panic!` em caminho de decode. Erro é `Result`.
@@ -46,7 +46,9 @@ ser ninguém. Requisitos, não recomendações:
 
 Um pacote malformado encerra a sessão de origem. Nunca o servidor.
 
-**2. Handshake e criptografia (`bedrock-crypto`)**
+#### 2. Handshake e autenticação
+
+Em `bedrock-crypto` (primitivas) e `bedrock-protocol` (cadeia de login).
 
 - A cadeia JWT é validada até a chave raiz da Mojang. Algoritmo esperado é fixado —
   aceitar `alg` vindo do token é a vulnerabilidade clássica de JWT.
@@ -55,7 +57,7 @@ Um pacote malformado encerra a sessão de origem. Nunca o servidor.
 - Falha de validação é indistinguível, para o cliente, entre "assinatura inválida" e
   "identidade desconhecida".
 
-**3. Esgotamento de recursos**
+#### 3. Esgotamento de recursos
 
 UDP não tem handshake de transporte, então qualquer um pode alegar ser qualquer origem:
 
@@ -68,7 +70,7 @@ UDP não tem handshake de transporte, então qualquer um pode alegar ser qualque
   recebido. Isso restringe o tamanho do payload de `UnconnectedPong` e é requisito de
   design, não configuração.
 
-**4. Plugins**
+#### 4. Plugins
 
 Ver [ADR-005](docs/DECISIONS.md#adr-005--sandbox-de-plugins-como-requisito) e
 [PLUGIN_API.md](docs/PLUGIN_API.md). Resumo: capacidades declaradas no manifesto, nada
@@ -78,7 +80,7 @@ servidor.
 Até o M3 não há sistema de plugins — e portanto não há como avaliar essa superfície além
 do papel.
 
-**5. Confiança no cliente**
+#### 5. Confiança no cliente
 
 Regra: **nenhuma afirmação do cliente sobre estado de jogo é aceita sem validação.**
 Posição, alcance de interação, velocidade e identidade são validados pelo servidor. Isso

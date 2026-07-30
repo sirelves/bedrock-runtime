@@ -14,7 +14,7 @@ que boa.
 tempo, não do nosso.
 
 Se você quer ajudar e não sabe por onde: as issues marcadas `good first issue` são
-autocontidas. Fora delas, o gargalo do projeto está no [M0](docs/ROADMAP.md#m0--um-cliente-entra-anda-e-vê-chunks-reais).
+autocontidas. Fora delas, o gargalo do projeto está no [M0](docs/ROADMAP.md#m0--um-cliente-entra-anda-e-vê-chunks).
 
 ## Regras não negociáveis
 

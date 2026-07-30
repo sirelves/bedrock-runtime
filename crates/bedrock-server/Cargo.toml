@@ -3,7 +3,6 @@ name = "bedrock-server"
 description = "Tick loop, sessions and orchestration. The only crate that knows all others."
 version.workspace = true
 edition.workspace = true
-rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
@@ -13,6 +12,7 @@ bedrock-protocol.workspace = true
 bedrock-raknet.workspace = true
 bedrock-crypto.workspace = true
 bedrock-world.workspace = true
+bedrock-blocks.workspace = true
 
 [lints]
 workspace = true

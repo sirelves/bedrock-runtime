@@ -78,7 +78,7 @@ madura em Rust — este é código próprio.
   `split_count` enorme e nunca enviar os fragmentos. Limite de memória por sessão e
   timeout de remontagem são requisito, não otimização.
 - **Retransmissão mal calibrada mata o desempenho antes do jogo existir.** RTO fixo é
-  aceitável para fechar o M0; RTO adaptativo entra no M3.
+  aceitável para fechar o M0; RTO adaptativo entra no M2, com os números na mão.
 - **A ordem de janela de ordenação é por canal.** Misturar canais é fonte comum de
   travamento silencioso.
 
@@ -123,7 +123,7 @@ O fluxo, na ordem em que acontece:
 - **Contador de pacotes.** Há um checksum/contador por pacote que entra na cifra. A
   fórmula exata é a segunda causa mais comum de "descriptografa mas vira lixo".
 - Se a validação da cadeia da Mojang será obrigatória por padrão (modo online) — ver
-  [SECURITY.md](../SECURITY.md#autenticação).
+  [SECURITY.md](../SECURITY.md#2-handshake-e-autenticação).
 
 ### Critério de conclusão da camada
 
@@ -154,7 +154,7 @@ Pontos de atenção:
 
 **Estado:** não iniciado.
 
-Para o M0 ("entra, anda e vê chunks reais"), o conjunto mínimo é:
+Para o M0 ("entra, anda e vê chunks"), o conjunto mínimo é:
 
 | Pacote | Direção | Papel |
 |---|---|---|

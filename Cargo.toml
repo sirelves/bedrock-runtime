@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/bedrock-blocks",
     "crates/bedrock-raknet",
     "crates/bedrock-crypto",
     "crates/bedrock-nbt",
@@ -13,7 +14,6 @@ members = [
 [workspace.package]
 version = "0.0.0"
 edition = "2024"
-rust-version = "1.90"
 license = "MIT"
 repository = "https://github.com/sirelves/bedrock-runtime"
 authors = ["bedrock-runtime contributors"]
@@ -21,6 +21,7 @@ authors = ["bedrock-runtime contributors"]
 # O grafo de dependencias entre crates e normativo — ver docs/ARCHITECTURE.md.
 # Um PR que adicione uma dependencia interna fora do grafo nao e mesclado.
 [workspace.dependencies]
+bedrock-blocks = { path = "crates/bedrock-blocks", version = "0.0.0" }
 bedrock-raknet = { path = "crates/bedrock-raknet", version = "0.0.0" }
 bedrock-crypto = { path = "crates/bedrock-crypto", version = "0.0.0" }
 bedrock-nbt = { path = "crates/bedrock-nbt", version = "0.0.0" }

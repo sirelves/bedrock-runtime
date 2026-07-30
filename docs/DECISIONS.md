@@ -16,6 +16,10 @@ de ideia. Um ADR não é apagado; é substituído por outro que o marca como sup
 | [005](#adr-005--sandbox-de-plugins-como-requisito) | Sandbox de plugins como requisito | Aceita |
 | [006](#adr-006--monolito-modular) | Monolito modular | Aceita |
 | [007](#adr-007--sem-fork-de-projeto-existente) | Sem fork de projeto existente | Aceita |
+| [008](#adr-008--vocabulário-de-blocos-como-crate-folha) | Vocabulário de blocos como crate folha | Aceita |
+| [009](#adr-009--crypto-só-com-primitivas) | `crypto` só com primitivas | Aceita |
+| [010](#adr-010--seções-de-chunk-imutáveis) | Seções de chunk imutáveis | Aceita |
+| [011](#adr-011--sem-io-de-mundo-no-m0) | Sem I/O de mundo no M0 | Aceita |
 
 ---
 
@@ -190,3 +194,119 @@ de comportamento do protocolo ([PROTOCOL.md](PROTOCOL.md#referências)), nunca c
 - Negativa: erros que aqueles projetos já resolveram serão redescobertos.
 - Mitigação: fixtures capturados de tráfego real ([M0.1](ROADMAP.md#m01--ferramenta-de-captura))
   substituem a leitura de código alheio como fonte de verdade.
+
+---
+
+## ADR-008 — Vocabulário de blocos como crate folha
+
+**Contexto.** Nomear um bloco é necessário nos dois lados do sistema: `bedrock-world`
+precisa armazenar qual bloco está em cada posição, e `bedrock-protocol` precisa
+codificar isso para o cliente. Mas o grafo de dependências proíbe que um dependa do
+outro ([ARCHITECTURE.md](ARCHITECTURE.md#grafo-de-dependências)), e o tipo não tinha
+dono — o que na prática significa que o primeiro dos dois a ser escrito ia arrastar o
+outro junto.
+
+Há uma sutileza que resolve o desenho: **identidade de bloco e runtime id são coisas
+diferentes.** O runtime id é um número atribuído por versão do protocolo, válido só
+naquele contexto de rede. O armazenamento nunca deveria vê-lo.
+
+**Decisão.** Um crate folha `bedrock-blocks` com a identidade do bloco — nome com
+namespace e propriedades de estado. `bedrock-world` e `bedrock-protocol` dependem dele.
+A **paleta de runtime ids fica em `bedrock-protocol`**, porque é conceito de rede.
+
+**Consequências.**
+- Positiva: os dois lados compartilham vocabulário sem se acoplarem.
+- Positiva: o formato em disco fica imune a mudança de versão de protocolo — o disco
+  guarda nomes, não ids.
+- Negativa: mais um crate. Aceito: a alternativa é o acoplamento que o grafo existe
+  para impedir.
+- Negativa: converter nome→runtime id na serialização de chunk custa uma indireção.
+  Se aparecer no perfil, resolve-se com cache — não com acoplamento.
+
+---
+
+## ADR-009 — `crypto` só com primitivas
+
+**Contexto.** `bedrock-crypto` tinha acumulado três responsabilidades: validação da
+cadeia JWT do Xbox Live, criptografia de sessão, e compressão de batch.
+
+Duas delas não pertencem ali. Compressão não é criptografia. E a cadeia de login conhece
+Minecraft — XUID, dados de skin, o formato do pacote `Login` — o que quebrava a regra
+de que crates abaixo do `server` não conhecem o jogo. O resultado é que o único crate
+que precisa ser auditável isoladamente era o que mais misturava camadas.
+
+**Decisão.** `bedrock-crypto` fica com ECDH, derivação de chave e cifra do stream.
+Cadeia de login e compressão/batching vão para `bedrock-protocol`, que é onde o formato
+de fio mora.
+
+**Consequências.**
+- Positiva: auditoria de segurança criptográfica passa a ter escopo pequeno e real.
+- Positiva: `crypto` deixa de conhecer Minecraft e volta a respeitar o grafo.
+- Negativa: `bedrock-protocol` fica maior e passa a conter lógica sensível (validação de
+  assinatura). Mitigado mantendo-a num módulo próprio, com as mesmas regras de revisão.
+
+---
+
+## ADR-010 — Seções de chunk imutáveis
+
+**Contexto.** [PERFORMANCE.md](PERFORMANCE.md#onde-o-custo-provavelmente-está) aponta
+serialização e compressão de chunk como a primeira candidata a sair do loop de tick —
+é grande, frequente, e está no caminho de todo jogador que se move. Mas
+[ARCHITECTURE.md](ARCHITECTURE.md#modelo-de-concorrência) proíbe entregar referência ao
+estado vivo do mundo para outra thread.
+
+Serializar um chunk **é** ler o mundo. Com seções mutáveis, essas duas regras se
+contradizem e a otimização mais importante do projeto fica impossível por construção.
+Descobrir isso depois de escrever `bedrock-world` seria reescrevê-lo.
+
+**Decisão.** Seções de chunk são imutáveis e compartilhadas por `Arc`. Modificar um
+bloco produz uma seção nova (copy-on-write); o chunk troca o ponteiro. Serialização
+recebe um `Arc` de dado congelado e pode ir para qualquer thread.
+
+**Consequências.**
+- Positiva: serialização e compressão saem do tick sem nenhum lock.
+- Positiva: snapshot para salvamento em disco é grátis — é clonar um `Arc`.
+- **Negativa: modificar um bloco copia a seção inteira.** Para construção em rajada isso
+  é caro. Mitigação prevista: agrupar mutações do mesmo tick numa única cópia por seção.
+  Se o perfil mostrar que não basta, a resposta é uma seção mutável *dentro do tick* que
+  congela ao final — não abrir mão da imutabilidade na fronteira.
+- Negativa: mais alocação. Medir no M2 antes de reagir.
+
+---
+
+## ADR-011 — Sem I/O de mundo no M0
+
+**Contexto.** O critério original do M0 dizia "chunks reais carregados do disco". Isso
+contradizia [COMPATIBILITY.md](COMPATIBILITY.md), que deixava o formato de armazenamento
+em aberto — não dá para ler do disco sem escolher o formato. E as duas saídas eram ruins:
+implementar o LevelDB do Bedrock no M0 (trabalho do tamanho do RakNet, com dependência
+C++) ou inventar um formato provisório que seria descartado no M1.
+
+O ponto que resolve: **o cliente não sabe de onde veio o chunk.** Ler do disco não prova
+nada sobre o protocolo que gerar em memória não prove.
+
+**Decisão.** O M0 não toca o disco. Mundo gerado em memória. Persistência inteira vai
+para o M1, quando a representação em memória já estiver estável e o formato puder ser
+desenhado em cima dela em vez de adivinhado.
+
+**Consequências.**
+- Positiva: o M0 tem um problema difícil (protocolo) em vez de dois.
+- Positiva: o formato em disco será desenhado sabendo como o chunk é representado.
+- Negativa: nada é persistido até o M1 — reiniciar perde tudo. Irrelevante enquanto o
+  objetivo é um cliente conectar.
+
+---
+
+## Nota sobre prioridade
+
+Com o objetivo do projeto sendo demonstrar viabilidade técnica em Rust
+([ROADMAP.md](ROADMAP.md#o-que-o-projeto-está-tentando-provar)), dois itens deixam de
+ser requisito e passam a ser opcionais, sem que isso invalide nenhum ADR:
+
+- **Sistema de plugins** ([ADR-002](#adr-002--api-de-plugins-com-runtime-adiado),
+  [ADR-005](#adr-005--sandbox-de-plugins-como-requisito)) — o contrato continua válido
+  e as decisões continuam de pé; o M3 é opcional.
+- **Compatibilidade com mundos vanilla** — fora de escopo, não adiada.
+
+O que **não** é opcional é o M2: é ele que valida ou derruba
+[ADR-001](#adr-001--core-em-rust), que é a premissa do projeto inteiro.

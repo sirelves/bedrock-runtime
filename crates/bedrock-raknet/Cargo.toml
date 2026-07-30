@@ -3,7 +3,6 @@ name = "bedrock-raknet"
 description = "RakNet transport over UDP. Knows nothing about Minecraft."
 version.workspace = true
 edition.workspace = true
-rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true

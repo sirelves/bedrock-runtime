@@ -20,7 +20,7 @@ Portanto a métrica primária é **p99 de MSPT**, não TPS médio.
 
 ## Metas (hipóteses até o M2)
 
-Carga de referência: 50 jogadores, view distance 8, mundo carregado de disco.
+Carga de referência: 50 jogadores, view distance 8.
 
 | Métrica | Meta | Por quê |
 |---|---|---|
@@ -86,7 +86,7 @@ não verificada.
 Coisas que **não** vamos perseguir:
 
 - Bater um servidor específico em benchmark de marketing.
-- Otimizar antes do M1. Correção do protocolo primeiro; um servidor rápido que não deixa
+- Otimizar antes do M2. Correção do protocolo primeiro; um servidor rápido que não deixa
   ninguém entrar tem desempenho zero.
 - Micro-otimização de código frio. Se não aparece no perfil, não existe.
 - Reduzir uso de memória abaixo da meta às custas de legibilidade.

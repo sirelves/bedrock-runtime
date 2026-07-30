@@ -8,11 +8,14 @@ Um servidor Minecraft: Bedrock Edition escrito em Rust.
 
 ## Por que
 
-Os servidores Bedrock existentes forçam uma escolha ruim: o servidor oficial da Mojang
-é fechado e não extensível, e as alternativas open source pagam o custo de runtimes
-com garbage collector em um loop de tick de 50 ms. `bedrock-runtime` aposta que um core
-em Rust entrega latência previsível (sem pausas de GC) e uma superfície de plugins segura
-por construção.
+Os servidores Bedrock open source existentes rodam em runtimes com garbage collector,
+dentro de um loop de tick com orçamento de 50 ms. A tese deste projeto é que um core em
+Rust entrega latência previsível — sem as pausas de GC que aparecem como travamento
+simultâneo para todo mundo conectado.
+
+**A tese é falseável e tem número:** MSPT p99 abaixo de 25 ms com 50 jogadores, medido
+por uma suíte de carga. Esse é o critério do [M2](docs/ROADMAP.md#m2--os-números), e se
+ele não fechar, a premissa do projeto está errada.
 
 Não é um fork nem uma reimplementação de nenhum projeto existente. É código novo, com
 o protocolo implementado a partir de observação e das referências listadas em
@@ -26,15 +29,17 @@ o protocolo implementado a partir de observação e das referências listadas em
 | Handshake / criptografia | não iniciado |
 | Codec de pacotes | não iniciado |
 | Mundo e chunks | não iniciado |
-| API de plugins | apenas contrato ([PLUGIN_API.md](docs/PLUGIN_API.md)) |
+| Persistência | fora do M0 ([ADR-011](docs/DECISIONS.md#adr-011--sem-io-de-mundo-no-m0)) |
+| API de plugins | apenas contrato, e opcional ([PLUGIN_API.md](docs/PLUGIN_API.md)) |
 
 O critério de conclusão do M0 é objetivo: **um cliente Bedrock não modificado conecta,
-se move e recebe chunks reais de um mundo carregado do disco.** Detalhes e milestones
+se move e recebe chunks de um mundo gerado.** Nenhum I/O de mundo no M0 — ler do disco
+não prova nada sobre o protocolo que gerar em memória não prove. Detalhes e milestones
 seguintes em [ROADMAP.md](docs/ROADMAP.md).
 
 ## Quick start
 
-Requer Rust 1.90+ (a versão exata está em `rust-toolchain.toml`).
+A versão do Rust está fixada em `rust-toolchain.toml` e é a única testada em CI.
 
 ```bash
 git clone https://github.com/sirelves/bedrock-runtime
@@ -63,11 +68,15 @@ sai. Não tente conectar um cliente ainda.
 
 ## Escopo
 
-**Dentro:** servidor dedicado, uma versão estável do Bedrock por vez, mundos em disco,
-plugins, multiplayer.
+**Dentro:** servidor dedicado, uma versão estável do Bedrock por vez, multiplayer,
+armazenamento em formato próprio, e os números que validam a tese.
 
-**Fora:** cliente, proxy entre versões, compatibilidade com Java Edition, suporte a
-Education Edition, geração de mundo idêntica à vanilla (paridade de seed).
+**Fora:** compatibilidade com mundos criados pelo Minecraft vanilla (formato LevelDB),
+cliente, proxy entre versões, compatibilidade com Java Edition, Education Edition,
+paridade de geração de mundo com a vanilla.
+
+**Opcional:** sistema de plugins. O contrato está escrito; a implementação só faz sentido
+depois que o M2 fechar.
 
 ## Licença
 

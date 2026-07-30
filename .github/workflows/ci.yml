@@ -60,3 +60,5 @@ jobs:
       - run: cargo doc --all --no-deps
         env:
           RUSTDOCFLAGS: -D warnings
+      # Os docs se referenciam entre si e sao normativos — ancora quebrada e bug.
+      - run: python3 scripts/check-links.py
