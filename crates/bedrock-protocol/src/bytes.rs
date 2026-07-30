@@ -131,6 +131,34 @@ impl<'a> Reader<'a> {
         Err(DecodeError::VarintTooLong)
     }
 
+    /// Reads an unsigned 64-bit varint.
+    pub fn varint64(&mut self) -> Result<u64> {
+        let mut value: u64 = 0;
+        for byte_index in 0..10 {
+            let byte = self.u8()?;
+            value |= u64::from(byte & 0x7f) << (byte_index * 7);
+            if byte & 0x80 == 0 {
+                return Ok(value);
+            }
+        }
+        Err(DecodeError::VarintTooLong)
+    }
+
+    /// Reads a zigzag-encoded signed varint.
+    ///
+    /// Zigzag maps small negatives to small unsigned values, so -1 costs one byte
+    /// instead of five. Mojang's schemas mark these fields `Compression`.
+    pub fn zigzag32(&mut self) -> Result<i32> {
+        let raw = self.varint()?;
+        Ok(((raw >> 1) as i32) ^ -((raw & 1) as i32))
+    }
+
+    /// Reads a zigzag-encoded signed 64-bit varint.
+    pub fn zigzag64(&mut self) -> Result<i64> {
+        let raw = self.varint64()?;
+        Ok(((raw >> 1) as i64) ^ -((raw & 1) as i64))
+    }
+
     /// Reads a varint length followed by that many bytes.
     pub fn prefixed(&mut self) -> Result<&'a [u8]> {
         let len = self.varint()? as usize;
@@ -197,6 +225,34 @@ impl Writer {
             }
             self.buf.push(byte | 0x80);
         }
+    }
+
+    /// Appends an unsigned 64-bit varint.
+    pub fn varint64(&mut self, mut v: u64) -> &mut Self {
+        loop {
+            let byte = (v & 0x7f) as u8;
+            v >>= 7;
+            if v == 0 {
+                self.buf.push(byte);
+                return self;
+            }
+            self.buf.push(byte | 0x80);
+        }
+    }
+
+    /// Appends a zigzag-encoded signed varint.
+    pub fn zigzag32(&mut self, v: i32) -> &mut Self {
+        self.varint(((v << 1) ^ (v >> 31)) as u32)
+    }
+
+    /// Appends a zigzag-encoded signed 64-bit varint.
+    pub fn zigzag64(&mut self, v: i64) -> &mut Self {
+        self.varint64(((v << 1) ^ (v >> 63)) as u64)
+    }
+
+    /// Appends a little-endian `f32`, the form positions use.
+    pub fn vec3(&mut self, x: f32, y: f32, z: f32) -> &mut Self {
+        self.f32(x).f32(y).f32(z)
     }
 
     /// Appends raw bytes.
@@ -307,6 +363,37 @@ mod tests {
         let mut w = Writer::new();
         w.varint(9999).bytes(b"short");
         assert!(Reader::new(&w.finish()).prefixed().is_err());
+    }
+
+    #[test]
+    fn zigzag_round_trips_including_negatives() {
+        for v in [0i32, 1, -1, 127, -128, i32::MAX, i32::MIN] {
+            let mut w = Writer::new();
+            w.zigzag32(v);
+            assert_eq!(Reader::new(&w.finish()).zigzag32().unwrap(), v, "{v}");
+        }
+        for v in [0i64, 1, -1, i64::MAX, i64::MIN] {
+            let mut w = Writer::new();
+            w.zigzag64(v);
+            assert_eq!(Reader::new(&w.finish()).zigzag64().unwrap(), v, "{v}");
+        }
+    }
+
+    /// The point of zigzag: -1 costs one byte, not five.
+    #[test]
+    fn zigzag_keeps_small_negatives_small() {
+        let mut w = Writer::new();
+        w.zigzag32(-1);
+        assert_eq!(w.len(), 1);
+    }
+
+    #[test]
+    fn varint64_round_trips() {
+        for v in [0u64, 1, 300, u32::MAX as u64, u64::MAX] {
+            let mut w = Writer::new();
+            w.varint64(v);
+            assert_eq!(Reader::new(&w.finish()).varint64().unwrap(), v, "{v}");
+        }
     }
 
     #[test]

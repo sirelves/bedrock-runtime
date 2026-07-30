@@ -157,8 +157,10 @@ fn report(event: &Event, options: &Options, captured: &mut usize) -> Result<(), 
             println!("packs         {peer}  cliente respondeu {response:?}");
         }
         Event::ReadyForWorld(peer) => {
-            println!("PRONTO PARA O MUNDO  {peer}");
-            println!("  o cliente esta esperando StartGame, que ainda nao existe");
+            println!("pronto        {peer}  cliente esperando o mundo");
+        }
+        Event::WorldSent(peer) => {
+            println!("  -> StartGame  {peer}  (mundo flat, paleta de blocos vazia)");
         }
         Event::Decrypted { peer, id, len } => {
             println!("cifrado ok    {peer}  packet {id}, {len} bytes decifrados");

@@ -20,6 +20,7 @@ use bedrock_protocol::handshake::{
 use bedrock_protocol::login::{self, ID_LOGIN, Login, TOKEN_AUDIENCE, TOKEN_ISSUER};
 use bedrock_protocol::play_status::{self, Status};
 use bedrock_protocol::resource_packs::{self, ID_RESOURCE_PACK_CLIENT_RESPONSE, Response};
+use bedrock_protocol::start_game::StartGame;
 use bedrock_protocol::version::{MINECRAFT_VERSION, PROTOCOL_VERSION};
 use bedrock_raknet::listener::{Event as RakEvent, Listener, ListenerConfig};
 use std::collections::{HashMap, HashSet};
@@ -91,8 +92,10 @@ pub enum Event {
         /// What it said.
         response: Response,
     },
-    /// The client has finished with packs and is waiting for a world.
+    /// The client has finished with packs and was sent a world description.
     ReadyForWorld(SocketAddr),
+    /// `StartGame` went out.
+    WorldSent(SocketAddr),
     /// An encrypted packet decrypted and its checksum held.
     Decrypted {
         /// Who sent it.
@@ -145,6 +148,8 @@ pub struct Server {
     ciphers: HashMap<SocketAddr, Cipher>,
     /// The protocol version each peer declared at login.
     protocols: HashMap<SocketAddr, u32>,
+    /// What the world calls itself in the client.
+    world_name: String,
     /// The issuer's published keys, and when they were set. Empty until the caller
     /// supplies them, and a login cannot be verified without them.
     identity_keys: Option<Jwks>,
@@ -168,6 +173,7 @@ impl Server {
     ) -> Self {
         Self {
             listener: Listener::new(local, guid, advertisement, config),
+            world_name: "bedrock-runtime".to_owned(),
             settled: HashSet::new(),
             keys: HashMap::new(),
             ciphers: HashMap::new(),
@@ -436,7 +442,17 @@ impl Server {
                             let stack = resource_packs::pack_stack_empty(MINECRAFT_VERSION);
                             self.send_encrypted(peer, &[stack], now);
                         }
-                        Response::StackFinished => events.push(Event::ReadyForWorld(peer)),
+                        Response::StackFinished => {
+                            events.push(Event::ReadyForWorld(peer));
+
+                            let world = StartGame::flat(
+                                &self.world_name,
+                                MINECRAFT_VERSION,
+                                concat!("bedrock-runtime ", env!("CARGO_PKG_VERSION")),
+                            );
+                            self.send_encrypted(peer, &[world.packet()], now);
+                            events.push(Event::WorldSent(peer));
+                        }
                         _ => {}
                     }
                 }
