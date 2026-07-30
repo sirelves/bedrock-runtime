@@ -13,6 +13,10 @@
 //!
 //! Status: not started.
 
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
+pub mod server;
+
 /// Target tick rate, in ticks per second.
 pub const TICKS_PER_SECOND: u32 = 20;
 
