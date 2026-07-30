@@ -85,6 +85,35 @@ flag errado desloca o campo de MTU em vez de falhar o decode — erro silencioso
 **A versão do protocolo RakNet é 11**, e `IncompatibleProtocolVersion` (0x19) devolve a
 versão que o servidor fala. Não há motivo para adivinhar: pergunte.
 
+**A escada de MTU é necessária.** Numa execução o degrau de 1492 não teve resposta e o
+de 1200 passou; noutra, contra o mesmo servidor, 1492 respondeu. Não é precaução
+teórica — o caminho muda.
+
+### Fase conectada — confirmada
+
+Uma conexão RakNet completa foi estabelecida contra um servidor real:
+`ConnectionRequest` → `ConnectionRequestAccepted` → `NewIncomingConnection` →
+`ConnectedPing`/`ConnectedPong` → `Disconnect`. Isso exercita, contra uma implementação
+de verdade, o cabeçalho de datagrama, o número de sequência u24 little-endian, o
+comprimento de frame **em bits**, os índices de confiabilidade e ordenação, e a nossa
+codificação de ACK.
+
+**O comprimento do frame é em bits, não bytes.** Lido como bytes, o payload sai com um
+oitavo do tamanho e todo frame seguinte no datagrama lê do offset errado — vira lixo, não
+erro de decode.
+
+**Os slots de endereço não usam o placeholder do RakNet.** O `ConnectionRequestAccepted`
+traz 20 slots, e este servidor preenche todos com `0.0.0.0:0` — não com o
+`255.255.255.255:0` que o RakNet usa como não-atribuído. As duas convenções significam a
+mesma coisa; quem conhecer só uma lê a outra como endereço roteável.
+
+**A quantidade de slots não está no fio.** O RakNet compila 10, servidores Bedrock mandam
+20. Decodificar lendo slots até sobrarem só os dois timestamps finais evita a adivinhação,
+e a resposta espelha a contagem recebida.
+
+**Ranges de ACK ficam ranges.** Um único record pode reivindicar 16 milhões de números de
+sequência; expandir isso numa lista é negação de serviço com um pacote.
+
 **Fase conectada** (o trabalho real):
 - *Datagrama* com número de sequência próprio, carregando um ou mais *frames*.
 - Confiabilidades: unreliable, unreliable sequenced, reliable, reliable ordered,
