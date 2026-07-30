@@ -11,8 +11,14 @@
 //! bound, and fragment reassembly needs a per-session memory cap and a timeout.
 //! See `SECURITY.md`.
 //!
-//! Status: not started. This is milestone M0.2 and the highest-risk item in the
-//! project — see `docs/ROADMAP.md`.
+//! Status: the offline (pre-connection) phase is being built first, because it is what
+//! confirms the target protocol version without needing any of the rest — see M0.1a in
+//! `docs/ROADMAP.md`. The connected phase is M0.2 and the highest-risk item in the
+//! project.
+
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
+pub mod wire;
 
 /// Default UDP port for Bedrock over IPv4.
 pub const DEFAULT_PORT_V4: u16 = 19132;
