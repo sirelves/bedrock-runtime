@@ -9,7 +9,7 @@ authors.workspace = true
 
 [dependencies]
 aes = "0.8"
-cfb8 = "0.8"
+ctr = "0.9"
 ring = "0.17"
 subtle = "2"
 p384 = { version = "0.13", features = ["ecdh", "ecdsa", "pkcs8"] }

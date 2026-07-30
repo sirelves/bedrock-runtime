@@ -229,16 +229,31 @@ O fluxo, na ordem em que acontece:
 assinatura com ela, e faz o ECDH com ela. Isso descartou o `ring` para o par de chaves
 ([ADR-014](DECISIONS.md#adr-014--p384-para-o-par-de-chaves-do-servidor)).
 
-### Ainda não confirmado
+### A cifra — confirmada, e o erro que custou caro
 
-Três coisas, e todas falham do mesmo jeito — o cliente deriva outra chave, não diz nada,
-e some:
+```text
+chave    SHA-256(salt || segredo ECDH)
+nonce    os 12 primeiros bytes da chave
+cifra    AES-256-GCM usado como fluxo, sem tag
+checksum SHA-256(contador_le_u64 || claro || chave)[..8], anexado antes de cifrar
+```
 
-1. A fórmula de derivação `SHA-256(salt || segredo)`.
-2. O alfabeto base64 do `x5u` e do `salt` — padrão ou url-safe.
-3. O modo da cifra e a fórmula do contador por pacote.
+O contador é u64 little-endian, começa em zero, é separado por direção e **nunca vai no
+fio**. Os dois lados contam.
 
-O `ClientToServerHandshake` chegando é o que confirma 1 e 2 de uma vez.
+**O tag do GCM não é produzido nem enviado.** O que trafega é a saída crua do keystream,
+o que preserva comprimento; a integridade vem do checksum. Sem o tag, a construção é
+exatamente CTR com o layout de contador do GCM: o primeiro bloco usa
+`nonce || 00 00 00 02`, porque o GCM reserva `J0 = nonce || 00 00 00 01` para o tag que
+aqui não existe.
+
+**O erro que isso corrigiu.** Uma versão anterior deste documento afirmava que os 11
+bytes de resposta do cliente *descartavam* GCM, porque um tag de 16 bytes teria alongado
+o pacote. Errado — e caro: virou CFB8 no código, e uma busca por força bruta de 32
+combinações que variava derivação, IV e checksum, mantendo fixo justamente o modo que
+estava errado. **É a assunção que você acha que provou que não entra no espaço de busca.**
+
+A resposta veio de ler uma implementação de referência, não de mais tentativas.
 
 ### Critério de conclusão da camada
 
