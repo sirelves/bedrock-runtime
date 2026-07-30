@@ -91,6 +91,8 @@ pub enum Event {
         /// What it said.
         response: Response,
     },
+    /// The client has finished with packs and is waiting for a world.
+    ReadyForWorld(SocketAddr),
     /// An encrypted packet decrypted and its checksum held.
     Decrypted {
         /// Who sent it.
@@ -426,11 +428,16 @@ impl Server {
                 if let Some(response) = response {
                     events.push(Event::PacksAnswered { peer, response });
 
-                    // Finishing the offer earns the stack; finishing the stack means
-                    // the client is waiting for the world.
-                    if response == Response::DownloadingFinished {
-                        let stack = resource_packs::pack_stack_empty(MINECRAFT_VERSION);
-                        self.send_encrypted(peer, &[stack], now);
+                    // Observed against a real client: with an empty offer it answers
+                    // StackFinished straight away rather than walking the two-step
+                    // flow, so waiting only for DownloadingFinished leaves it hanging.
+                    match response {
+                        Response::DownloadingFinished => {
+                            let stack = resource_packs::pack_stack_empty(MINECRAFT_VERSION);
+                            self.send_encrypted(peer, &[stack], now);
+                        }
+                        Response::StackFinished => events.push(Event::ReadyForWorld(peer)),
+                        _ => {}
                     }
                 }
             } else {

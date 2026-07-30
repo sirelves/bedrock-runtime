@@ -104,6 +104,16 @@ versão que o servidor fala. Não há motivo para adivinhar: pergunte.
 de 1200 passou; noutra, contra o mesmo servidor, 1492 respondeu. Não é precaução
 teórica — o caminho muda.
 
+### Negociação de pacotes — confirmada
+
+Um servidor sem pacote nenhum ainda precisa oferecer: o cliente não aceita um mundo
+antes de responder. Mas **a negociação é mais curta do que o caso geral sugere**.
+
+Contra um cliente real, com oferta vazia, ele responde `StackFinished` de imediato — não
+percorre o `DownloadingFinished` → `ResourcePackStack` → `StackFinished` que a sequência
+completa descreve. Um servidor que espere só pelo `DownloadingFinished` deixa o cliente
+pendurado, sem erro de nenhum dos lados.
+
 ### Fase conectada — confirmada
 
 Uma conexão RakNet completa foi estabelecida contra um servidor real:
