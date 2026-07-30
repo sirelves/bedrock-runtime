@@ -28,19 +28,30 @@ não sabe a diferença — e antecipar o formato de armazenamento aqui misturari
 problemas difíceis num só milestone.
 
 Este é o maior milestone do projeto e é assim de propósito: nada abaixo disso prova que
-o protocolo funciona. Internamente ele se divide em cinco etapas, cada uma com seu
+o protocolo funciona. Internamente ele se divide em seis etapas, cada uma com seu
 próprio critério.
 
-### M0.1 — Ferramenta de captura
-- Proxy MITM entre cliente real e servidor oficial, com dump de pacotes descriptografados.
-- **Fecha quando:** um login completo está capturado, descriptografado e salvo como
-  fixtures em disco, e a versão-alvo e o número de protocolo estão preenchidos em
-  `version.rs` e em [COMPATIBILITY.md](COMPATIBILITY.md#versão-alvo).
-- *Ordem primeiro de propósito.* Sem isso, as etapas seguintes são tentativa e erro.
+> **Correção de ordem.** A versão anterior deste roadmap colocava o proxy de captura
+> como primeira etapa, argumentando que sem ele as demais viram tentativa e erro. Isso
+> era circular: um proxy MITM fala RakNet com o cliente **e** com o servidor oficial, e
+> termina a criptografia dos dois lados — ou seja, precisa do M0.2 e do M0.3 prontos.
+>
+> O que quebra o ciclo é que a fase offline viaja em claro. Uma sonda de ping de ~150
+> linhas confirma a versão-alvo sem stack nenhuma, e o proxy passa para depois do
+> handshake, que é onde ele realmente rende: capturar `StartGame`.
+
+### M0.1 — Sonda de ping offline ✅
+- `UnconnectedPing`/`UnconnectedPong`, parser da string de anúncio, e uma sonda que
+  pergunta a versão a um servidor real.
+- **Fechou quando:** `PROTOCOL_VERSION` e `MINECRAFT_VERSION` deixaram de ser `None`,
+  com procedência registrada em [COMPATIBILITY.md](COMPATIBILITY.md#versão-alvo) e
+  pongs crus versionados como fixtures.
+- Resultado: protocolo `1001`, versão `1.26.30`, corroborado por dois servidores
+  independentes — e a descoberta de que servidores grandes anunciam número de fachada,
+  o que tornou "uma fonte só" insuficiente por evidência, não por precaução.
 
 ### M0.2 — RakNet
-- Ping/pong offline, abertura de conexão, MTU, confiabilidade, ordenação, fragmentação,
-  ACK/NACK, keepalive.
+- Abertura de conexão, MTU, confiabilidade, ordenação, fragmentação, ACK/NACK, keepalive.
 - **Fecha quando:** o servidor aparece na lista de mundos do cliente e a conexão chega
   a `ConnectionRequestAccepted`; testes de fragmentação com 1 KB / 64 KB / 1 MB passam.
 
@@ -50,13 +61,22 @@ próprio critério.
 - **Fecha quando:** `ClientToServerHandshake` chega, descriptografa e valida; um
   `PlayStatus` de login aceito chega ao cliente.
 
-### M0.4 — Spawn
+### M0.4 — Proxy de captura
+- Proxy MITM entre um cliente real e um servidor oficial, com dump dos pacotes já
+  descriptografados. Só é possível aqui: reusa o RakNet do M0.2 nos dois sentidos e a
+  criptografia do M0.3 nas duas pontas.
+- **Fecha quando:** um login completo até o spawn está capturado, descriptografado e
+  salvo como fixtures.
+- É o que torna o M0.5 viável em vez de adivinhação — `StartGame` tem dezenas de campos
+  e falha em silêncio.
+
+### M0.5 — Spawn
 - `ResourcePacks*`, `StartGame`, `BiomeDefinitionList`, paleta de blocos como artefato
   de dados, `PlayStatus` de player spawn.
 - **Fecha quando:** o cliente sai da tela de carregamento e mostra o jogador num mundo
   (ainda que vazio), sem desconectar por 60 segundos.
 
-### M0.5 — Mundo gerado e movimentação
+### M0.6 — Mundo gerado e movimentação
 - Gerador flat em memória, seções de chunk imutáveis
   ([ADR-010](DECISIONS.md#adr-010--seções-de-chunk-imutáveis)), `LevelChunk`,
   `NetworkChunkPublisherUpdate`, streaming por raio, entrada de movimentação do jogador.

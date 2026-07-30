@@ -14,19 +14,29 @@ atualizaram deixam de conectar.** Não é um bug e não haverá flag para contor
 A versão-alvo é uma constante única em `crates/bedrock-protocol/src/version.rs`. Esse
 arquivo é a fonte de verdade — a tabela abaixo é derivada dele, não o contrário.
 
-| Campo | Valor |
-|---|---|
-| Versão do Minecraft Bedrock | *a definir no M0.1* |
-| Número do protocolo | *a definir no M0.1* |
-| Algoritmo de compressão negociado | *a confirmar no M0.3* |
-| Modo da cifra | *a confirmar no M0.3* |
+| Campo | Valor | Confiança |
+|---|---|---|
+| Versão do Minecraft Bedrock | `1.26.30` | corroborada — 2 fontes independentes |
+| Número do protocolo | `1001` | corroborada — 2 fontes independentes |
+| Algoritmo de compressão negociado | *a confirmar no M0.3* | — |
+| Modo da cifra | *a confirmar no M0.3* | — |
 
-Os valores estão em branco de propósito. Preenchê-los com números plausíveis antes de
-um cliente real confirmar seria inventar dado — e um número de protocolo errado é a
-causa mais comum de "o servidor não aparece na lista", sem erro visível.
+**Como esses números foram obtidos.** Em 2026-07-30, quatro servidores públicos foram
+sondados com `cargo run -p bedrock-raknet --example ping`. Dois deles — Lifeboat e
+NetherGames, operadores sem relação entre si, rodando software diferente — anunciaram
+protocolo `1001` para a versão `1.26.30`. Os pongs crus estão versionados em
+`crates/bedrock-raknet/tests/fixtures/` e um teste os prende.
 
-Eles serão preenchidos na etapa [M0.1](ROADMAP.md#m01--ferramenta-de-captura), quando a
-captura de um login real confirmar cada um.
+**O que isso não é.** Autoridade. Os outros dois servidores sondados anunciaram
+protocolo `121` e `1` — números de fachada na frente de proxies multi-versão, junto com
+contadores como `20001/100001` jogadores. Um servidor de terceiro anuncia o que o
+operador configurou. O que dá peso ao `1001` é a concordância entre dois independentes,
+não o número em si.
+
+Duas coisas promovem isso de corroborado para confirmado, e ambas são baratas quando
+possíveis: sondar um Bedrock Dedicated Server oficial rodando localmente, ou completar
+um login real ([M0.3](ROADMAP.md#m03--handshake-e-criptografia)) — protocolo errado
+falha ali de forma barulhenta.
 
 ## Histórico de versões suportadas
 
@@ -40,7 +50,7 @@ Preenchido a cada atualização de versão-alvo.
 
 Quando a Mojang lança uma versão nova:
 
-1. Capturar um login com o cliente novo usando a ferramenta do M0.1.
+1. Capturar um login com o cliente novo usando o proxy do [M0.4](ROADMAP.md#m04--proxy-de-captura).
 2. Fazer o diff dos fixtures contra a versão anterior — é isso que revela o que mudou.
 3. Extrair novamente os artefatos de dados (paleta de blocos, definições de bioma,
    identificadores de entidade).
@@ -74,8 +84,9 @@ ao código é o que torna atualização de versão dolorosa em outros projetos.
 | macOS (Apple Silicon) | desenvolvimento; sem garantia de produção |
 | Windows | não testado, sem suporte |
 
-MSRV (versão mínima do Rust) está em `rust-toolchain.toml`. Aumentar a MSRV é mudança
-menor de versão, não maior.
+A versão do Rust está fixada em `rust-toolchain.toml` e é a única testada em CI. Não há
+compromisso de MSRV: prometer uma faixa de versões que ninguém verifica é pior do que
+não prometer nada.
 
 ## Clientes
 
