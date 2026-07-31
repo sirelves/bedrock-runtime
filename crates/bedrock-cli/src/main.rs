@@ -218,6 +218,18 @@ fn report(
         Event::Spawned { peer, columns } => {
             println!("  -> {columns} colunas + PlayStatus PlayerSpawn  {peer}");
         }
+        Event::ChunksStreamed {
+            peer,
+            chunk_x,
+            chunk_z,
+            columns,
+        } => {
+            // Crossing back into ground already sent costs nothing and says nothing;
+            // printing it would bury the moves that did stream world.
+            if *columns > 0 {
+                println!("  -> {columns} colunas  {peer}  entrou no chunk {chunk_x},{chunk_z}");
+            }
+        }
         Event::Decrypted { peer, id, len } => {
             println!("cifrado ok    {peer}  packet {id}, {len} bytes decifrados");
         }
