@@ -16,7 +16,10 @@ projeto; são coisas que podem ou não acontecer sem que a tese falhe.
 
 ---
 
-## M0 — Um cliente entra, anda e vê chunks
+## M0 — Um cliente entra, anda e vê chunks ✅
+
+**Fechou em 2026-07-31**, com as cinco etapas abaixo cumpridas contra um cliente
+Bedrock não modificado. O que vem agora é o [M1](#m1--multiplayer-e-persistência).
 
 **Critério de conclusão:** um cliente Minecraft Bedrock não modificado, na versão-alvo,
 encontra o servidor na lista, conecta, spawna, se move com movimentação refletida no
@@ -69,15 +72,23 @@ próprio critério — eram seis até o proxy de captura ser removido
   seu `ClientToServerHandshake` decifrado e validado, decifrou nosso `PlayStatus` de
   login aceito e seguiu para o `ClientCacheStatus` — o primeiro pacote da sequência
   pós-login.
-- **Dívida em aberto:** a verificação do token está implementada e testada contra as
-  chaves reais da Microsoft, mas o servidor ainda não busca o JWKS por HTTP, então o
-  caminho de produção aceita a identidade declarada sem verificar. Ver M0.3b.
+- A dívida que ficou aberta aqui — o servidor não buscava o JWKS e portanto aceitava a
+  identidade declarada — foi paga no M0.3b.
 
-### M0.3b — Autenticação online ligada
+### M0.3b — Autenticação online ligada ✅
 - Buscar o JWKS do emissor por HTTP, com cache e rotação de chave, e chamar a
   verificação no caminho do servidor.
-- **Fecha quando:** um login com token inválido ou expirado é recusado com
-  `PlayStatus` em vez de aceito.
+- **Fechou quando:** em 2026-07-31 o caminho de login passou a ser exercido por um token
+  assinado de verdade. O mesmo token é aceito dentro da validade e recusado com
+  `PlayStatus` depois dela — mesmos bytes, mesmas chaves, só o relógio mudou — e um
+  token com os claims editados é recusado pela assinatura.
+- A chave de teste que assina esses tokens está no repositório de propósito: sem uma
+  assinatura válida não dá para testar nada além do que é recusado *antes* dela.
+- Contra o emissor real: um cliente Bedrock logou e o gamertag veio dos claims
+  assinados, não do que o login declarava sobre si.
+- O `bedrock-cli` busca as chaves antes de abrir o socket e as renova de hora em hora.
+  Uma renovação que falha mantém as chaves anteriores — o que não acontece é o servidor
+  passar a aceitar quem não consegue verificar.
 
 ### M0.4 — Spawn ✅
 - `ResourcePacks*`, `StartGame`, raio de chunk, `LevelChunk`, `PlayStatus` de player

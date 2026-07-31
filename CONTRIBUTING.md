@@ -14,7 +14,8 @@ que boa.
 tempo, não do nosso.
 
 Se você quer ajudar e não sabe por onde: as issues marcadas `good first issue` são
-autocontidas. Fora delas, o gargalo do projeto está no [M0](docs/ROADMAP.md#m0--um-cliente-entra-anda-e-vê-chunks).
+autocontidas. Fora delas, o gargalo do projeto está no
+[M1](docs/ROADMAP.md#m1--multiplayer-e-persistência) — o M0 fechou em 2026-07-31.
 
 ## Regras não negociáveis
 
