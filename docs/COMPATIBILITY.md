@@ -80,11 +80,18 @@ para cada versão:
 | Artefato | O que é | Origem |
 |---|---|---|
 | Paleta de blocos | NBT com todos os estados de bloco da versão | dump da versão-alvo |
+| Runtime ids | índice de um bloco na lista canônica ordenada | `scripts/block-runtime-id.py` |
 | Definições de bioma | NBT enviado em `BiomeDefinitionList` | dump da versão-alvo |
 | Identificadores de entidade | lista enviada em `AvailableActorIdentifiers` | dump da versão-alvo |
 | Paleta de itens | mapeamento nome→id runtime | dump da versão-alvo |
 
-Ficam versionados em `assets/<versão>/` e são carregados em runtime. **Não** são gerados
+**Runtime id não é adivinhável.** É a posição do estado de bloco na lista canônica da
+versão, e `minecraft:air` é `13094`, não `0`. Assumir que ar é zero preenche o mundo com
+o que quer que ordene primeiro. O `scripts/block-runtime-id.py` deriva um id da lista
+publicada; um mundo flat precisa de dois de dezesseis mil, então eles são constantes no
+código em vez de asset — o script é o que os mantém reproduzíveis em vez de mágicos.
+
+Os artefatos maiores ficam versionados em `assets/<versão>/` e são carregados em runtime. **Não** são gerados
 por código nem embutidos no binário: são dados da Mojang, com versão própria, e misturá-los
 ao código é o que torna atualização de versão dolorosa em outros projetos.
 

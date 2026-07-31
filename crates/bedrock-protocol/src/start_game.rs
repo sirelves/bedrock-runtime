@@ -91,17 +91,23 @@ pub struct StartGame {
 }
 
 impl StartGame {
-    /// A flat creative world, which is the smallest thing a client will accept.
-    pub fn flat(world_name: &str, vanilla_version: &str, server_version: &str) -> Self {
+    /// A flat creative world, with the player standing on its surface.
+    pub fn flat(
+        world_name: &str,
+        vanilla_version: &str,
+        server_version: &str,
+        surface_height: i32,
+    ) -> Self {
         Self {
             entity_id: 1,
             runtime_id: 1,
             game_type: GameType::Creative,
-            position: (0.0, 70.0, 0.0),
+            // Feet at the surface: the topmost solid block is the one below it.
+            position: (0.5, surface_height as f32, 0.5),
             rotation: (0.0, 0.0),
             seed: 0,
             generator: Generator::Flat,
-            spawn: (0, 70, 0),
+            spawn: (0, surface_height, 0),
             world_name: world_name.to_owned(),
             vanilla_version: vanilla_version.to_owned(),
             server_version: server_version.to_owned(),
@@ -236,7 +242,7 @@ mod tests {
     use crate::bytes::Reader;
 
     fn sample() -> StartGame {
-        StartGame::flat("test world", "1.26.30", "bedrock-runtime")
+        StartGame::flat("test world", "1.26.30", "bedrock-runtime", 80)
     }
 
     #[test]
@@ -255,9 +261,9 @@ mod tests {
         assert_eq!(r.varint64().unwrap(), 1, "runtime id");
         assert_eq!(r.zigzag32().unwrap(), GameType::Creative as i32);
 
-        assert!((r.f32().unwrap() - 0.0).abs() < f32::EPSILON, "x");
-        assert!((r.f32().unwrap() - 70.0).abs() < f32::EPSILON, "y");
-        assert!((r.f32().unwrap() - 0.0).abs() < f32::EPSILON, "z");
+        assert!((r.f32().unwrap() - 0.5).abs() < f32::EPSILON, "x");
+        assert!((r.f32().unwrap() - 80.0).abs() < f32::EPSILON, "y");
+        assert!((r.f32().unwrap() - 0.5).abs() < f32::EPSILON, "z");
     }
 
     /// The spawn biome is a fixed u16 and the dimension a varint. Reading the biome as
@@ -282,7 +288,7 @@ mod tests {
 
     #[test]
     fn the_world_name_and_versions_survive() {
-        let body = StartGame::flat("meu mundo", "1.26.30", "bedrock-runtime").encode();
+        let body = StartGame::flat("meu mundo", "1.26.30", "bedrock-runtime", 80).encode();
         let text = String::from_utf8_lossy(&body);
         assert!(text.contains("meu mundo"));
         assert!(text.contains("1.26.30"));
@@ -303,8 +309,8 @@ mod tests {
 
     #[test]
     fn two_worlds_differ_only_where_they_should() {
-        let a = StartGame::flat("one", "1.26.30", "s").encode();
-        let b = StartGame::flat("two", "1.26.30", "s").encode();
+        let a = StartGame::flat("one", "1.26.30", "s", 80).encode();
+        let b = StartGame::flat("two", "1.26.30", "s", 80).encode();
         assert_ne!(a, b);
         assert_eq!(a.len(), b.len(), "same-length names, same-length packet");
     }

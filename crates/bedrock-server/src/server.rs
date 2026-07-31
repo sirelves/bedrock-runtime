@@ -70,6 +70,9 @@ impl Stage {
     }
 }
 
+/// Where the flat world's surface sits. The player spawns standing on it.
+pub const SURFACE_HEIGHT: i32 = 80;
+
 /// How far this server streams chunks, in chunks.
 ///
 /// Small on purpose while there is no world to stream: granting a radius the server
@@ -482,10 +485,12 @@ impl Server {
             now,
         );
 
-        let payload = level_chunk::void_column(BIOME_PLAINS);
+        let payload = level_chunk::flat_column(BIOME_PLAINS, SURFACE_HEIGHT);
+        let subchunks = level_chunk::subchunks_up_to(SURFACE_HEIGHT);
         let columns = level_chunk::columns_around(0, 0, radius);
         for &(x, z) in &columns {
-            self.send_encrypted(peer, &[level_chunk::level_chunk(x, z, &payload)], now);
+            let column = level_chunk::level_chunk(x, z, subchunks, &payload);
+            self.send_encrypted(peer, &[column], now);
         }
 
         if self.stage >= Stage::Spawn {
@@ -565,6 +570,7 @@ impl Server {
                                 &self.world_name,
                                 MINECRAFT_VERSION,
                                 concat!("bedrock-runtime ", env!("CARGO_PKG_VERSION")),
+                                SURFACE_HEIGHT,
                             );
                             self.send_encrypted(peer, &[world.packet()], now);
 
