@@ -360,6 +360,7 @@ RequestChunkRadius      ──►  ChunkRadiusUpdated
                         ──►  NetworkChunkPublisherUpdate, colunas, PlayStatus PlayerSpawn
 SetLocalPlayerAsInitialized  ◄── o cliente confirma que spawnou
 PlayerAuthInput ~20/s        ◄── o jogador está jogando
+   ao cruzar de coluna    ──►  NetworkChunkPublisherUpdate no novo centro, colunas novas
 ```
 
 **Nenhum registro de item, entidade ou bioma é enviado.** Ver acima o porquê.
@@ -381,7 +382,38 @@ Para o M0 ("entra, anda e vê chunks"), o conjunto mínimo é:
 | `SetTime`, `SetDifficulty`, `BiomeDefinitionList`, `AvailableActorIdentifiers` | S→C | estado inicial esperado pelo cliente |
 | `Disconnect` | S→C | encerramento com motivo legível |
 
-Notas de risco:
+### Uma posição no fio é 1,62 acima dos pés
+
+Confirmado contra um cliente real em 2026-07-31, num mundo flat com superfície em
+y = 80:
+
+```text
+mandamos StartGame com y = 80      o jogador nasceu dentro da pedra e teve de sair
+de pé sobre a superfície           o cliente reporta y = 81,66
+agachado, sem sair do lugar        o cliente reporta a mesma coisa
+mandamos StartGame com y = 81,62   o jogador nasce de pé, e reporta 81,62
+```
+
+O deslocamento é **constante e não é a câmera**: agachar baixa o olho e não mudou a
+posição reportada nem por um centésimo de bloco, com o limiar do log em 0,05. Vale nos
+dois sentidos — no `StartGame` que enviamos e no `PlayerAuthInput` que recebemos.
+
+PocketMine e Nukkit carregam a mesma constante como *base offset* por tipo de entidade,
+somada na saída e subtraída na entrada. Isso é consulta de comportamento, não fonte da
+nossa: a constante do projeto vem da medição acima.
+
+**Por que isso não apareceu no M0.4:** o mundo era vazio. Nascer 1,6 bloco abaixo do
+pretendido não tem sintoma quando não há nada em volta para se enterrar. O bug esperou o
+chão sólido para existir.
+
+### Uma coluna só declara os subchunks que têm bloco
+
+O M0.4 enviava dez subchunks para uma superfície em y = 80, o último todo de ar. Enviar
+nove — parando no mais alto que tem bloco — foi aceito pelo mesmo cliente sem diferença
+observável: acima do último subchunk enviado o cliente desenha céu por conta própria.
+
+### Notas de risco
+
 - **`StartGame` é onde a maioria das tentativas trava.** Ele é grande, tem muitos campos
   cujo significado é obscuro, e a ordem importa. Um campo a mais ou a menos e o cliente
   desconecta sem mensagem útil.

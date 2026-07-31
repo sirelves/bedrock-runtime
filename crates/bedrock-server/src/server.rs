@@ -7,6 +7,7 @@
 //! It answers `RequestNetworkSettings` and nothing else yet. Everything past that is
 //! reported so a capture can be taken of bytes no third-party documentation covers.
 
+use crate::columns;
 use base64::Engine;
 use bedrock_crypto::agreement::ServerKey;
 use bedrock_crypto::cipher::Cipher;
@@ -30,6 +31,7 @@ use bedrock_protocol::start_game::StartGame;
 use bedrock_protocol::version::{MINECRAFT_VERSION, PROTOCOL_VERSION};
 use bedrock_raknet::listener::{Event as RakEvent, Listener, ListenerConfig};
 pub use bedrock_raknet::session::Closed;
+use bedrock_world::World;
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -79,6 +81,13 @@ pub const SURFACE_HEIGHT: i32 = 80;
 /// Small on purpose while there is no world to stream: granting a radius the server
 /// cannot fill leaves the client waiting for chunks that are not coming.
 pub const SERVER_CHUNK_RADIUS: i32 = 4;
+
+/// How far past the view distance a column is remembered as already sent.
+///
+/// Without a margin, a player standing on a chunk boundary crosses it back and forth
+/// and the columns behind them are forgotten and re-sent at every step. Two chunks of
+/// slack costs a little memory per player and turns that into nothing at all.
+pub const FORGET_MARGIN: i32 = 2;
 
 /// The protocol version this server speaks.
 pub const TARGET_PROTOCOL: u32 = PROTOCOL_VERSION;
@@ -169,13 +178,25 @@ pub enum Event {
     /// This is the client's own statement that the chunks arrived and rendered. A client
     /// that discards every column it is sent never reaches this point.
     PlayerInitialized(SocketAddr),
+    /// The player crossed into a new column and the world around it went out.
+    ChunksStreamed {
+        /// Who moved.
+        peer: SocketAddr,
+        /// The column they are standing in now, along X.
+        chunk_x: i32,
+        /// Along Z.
+        chunk_z: i32,
+        /// How many columns this move needed. Zero means they walked back over ground
+        /// they had already been sent.
+        columns: usize,
+    },
     /// The client reported where the player is.
     PlayerMoved {
         /// Who moved.
         peer: SocketAddr,
         /// Where they say they are, along X.
         x: f32,
-        /// Along Y. This is the feet, so standing on the surface reports the surface.
+        /// Along Y, 1.62 above the feet — see `bedrock_protocol::player::POSITION_OFFSET`.
         y: f32,
         /// Along Z.
         z: f32,
@@ -205,6 +226,23 @@ pub enum Event {
     Disconnected(SocketAddr, Closed),
 }
 
+/// What the server knows about a player who is in the world.
+///
+/// Only what streaming needs: where they are, how far they see, and which columns they
+/// have already been sent. Anything else about a player belongs to whatever milestone
+/// introduces it.
+#[derive(Debug)]
+struct Player {
+    /// View distance granted to this client, in chunks.
+    radius: i32,
+    /// The column the streaming is currently centred on.
+    center: (i32, i32),
+    /// Columns already sent. Sending one twice is bytes for nothing.
+    sent: HashSet<(i32, i32)>,
+    /// The last position the client reported, in blocks.
+    position: (f32, f32, f32),
+}
+
 /// The advertisement a client matches against its own version.
 pub fn advertisement(
     name: &str,
@@ -232,6 +270,10 @@ pub struct Server {
     ciphers: HashMap<SocketAddr, Cipher>,
     /// The protocol version each peer declared at login.
     protocols: HashMap<SocketAddr, u32>,
+    /// Players in the world, and what they have been sent.
+    players: HashMap<SocketAddr, Player>,
+    /// The world itself. Generated in memory; no disk in M0 (ADR-011).
+    world: World,
     /// What the world calls itself in the client.
     world_name: String,
     /// How far the login sequence runs before stopping.
@@ -265,9 +307,16 @@ impl Server {
             keys: HashMap::new(),
             ciphers: HashMap::new(),
             protocols: HashMap::new(),
+            players: HashMap::new(),
+            world: World::flat(SURFACE_HEIGHT),
             identity_keys: None,
             clock: None,
         }
+    }
+
+    /// Columns held in memory right now.
+    pub fn loaded_columns(&self) -> usize {
+        self.world.loaded()
     }
 
     /// Supplies the issuer's signing keys.
@@ -342,6 +391,7 @@ impl Server {
                     self.keys.remove(&peer);
                     self.ciphers.remove(&peer);
                     self.protocols.remove(&peer);
+                    self.players.remove(&peer);
                     events.push(Event::Disconnected(peer, reason));
                 }
                 RakEvent::Payload(peer, payload) => {
@@ -488,39 +538,117 @@ impl Server {
 impl Server {
     /// Sends the world around spawn, then tells the client it may appear in it.
     ///
-    /// The publisher update goes first: it names the point the client accepts columns
-    /// around, and without it the columns are discarded however many are sent.
-    ///
     /// `PlayStatus` goes last, after the columns. Telling a client to spawn into a
     /// world it has not received is how it ends up standing in nothing.
     fn stream_world(&mut self, peer: SocketAddr, radius: i32, now: Instant) -> Event {
-        self.send_encrypted(
+        self.players.insert(
             peer,
-            &[level_chunk::publisher_update(
-                0,
-                SURFACE_HEIGHT,
-                0,
-                (radius.max(0) * level_chunk::CHUNK_WIDTH) as u32,
-            )],
-            now,
+            Player {
+                radius: radius.max(0),
+                center: (0, 0),
+                sent: HashSet::new(),
+                position: (0.0, SURFACE_HEIGHT as f32, 0.0),
+            },
         );
 
-        let payload = level_chunk::flat_column(BIOME_PLAINS, SURFACE_HEIGHT);
-        let subchunks = level_chunk::subchunks_up_to(SURFACE_HEIGHT);
-        let columns = level_chunk::columns_around(0, 0, radius);
-        for &(x, z) in &columns {
-            let column = level_chunk::level_chunk(x, z, subchunks, &payload);
-            self.send_encrypted(peer, &[column], now);
-        }
+        let columns = self.stream_around(peer, (0, 0), now);
 
         if self.stage >= Stage::Spawn {
             self.send_encrypted(peer, &[play_status::packet(Status::PlayerSpawn)], now);
         }
 
-        Event::Spawned {
+        Event::Spawned { peer, columns }
+    }
+
+    /// Sends whatever columns a player can see from `center` and has not been sent yet.
+    ///
+    /// The publisher update goes first: it names the point the client accepts columns
+    /// around, and without it the columns are discarded however many are sent. It is
+    /// re-sent every time the centre moves, which is what lets a walking player keep
+    /// receiving world instead of walking off the edge of what spawn covered.
+    fn stream_around(&mut self, peer: SocketAddr, center: (i32, i32), now: Instant) -> usize {
+        let Some(player) = self.players.get_mut(&peer) else {
+            return 0;
+        };
+        let radius = player.radius;
+        let feet = (player.position.1 - player::POSITION_OFFSET) as i32;
+        player.center = center;
+
+        // Columns far behind are forgotten so that walking back into them sends them
+        // again. The margin is what stops a player pacing across one boundary from
+        // re-sending the same column every step.
+        let forget = radius + FORGET_MARGIN;
+        player
+            .sent
+            .retain(|&(x, z)| (x - center.0).abs() <= forget && (z - center.1).abs() <= forget);
+
+        self.send_encrypted(
             peer,
-            columns: columns.len(),
+            &[level_chunk::publisher_update(
+                center.0 * level_chunk::CHUNK_WIDTH,
+                feet,
+                center.1 * level_chunk::CHUNK_WIDTH,
+                (radius * level_chunk::CHUNK_WIDTH) as u32,
+            )],
+            now,
+        );
+
+        let wanted = level_chunk::columns_around(center.0, center.1, radius);
+        let mut sent = 0;
+        for (x, z) in wanted {
+            let Some(player) = self.players.get_mut(&peer) else {
+                break;
+            };
+            if !player.sent.insert((x, z)) {
+                continue;
+            }
+            let column = columns::column_packet(self.world.chunk(x, z), BIOME_PLAINS);
+            self.send_encrypted(peer, &[column], now);
+            sent += 1;
         }
+        sent
+    }
+
+    /// Takes a reported position and streams around it if the player crossed into a new
+    /// column.
+    fn on_player_moved(
+        &mut self,
+        peer: SocketAddr,
+        input: player::AuthInput,
+        now: Instant,
+    ) -> Vec<Event> {
+        let Some(player) = self.players.get_mut(&peer) else {
+            return vec![Event::PlayerMoved {
+                peer,
+                x: input.x,
+                y: input.y,
+                z: input.z,
+            }];
+        };
+        player.position = (input.x, input.y, input.z);
+
+        let center = (
+            (input.x.floor() as i32).div_euclid(level_chunk::CHUNK_WIDTH),
+            (input.z.floor() as i32).div_euclid(level_chunk::CHUNK_WIDTH),
+        );
+        let moved = center != player.center;
+
+        let mut events = vec![Event::PlayerMoved {
+            peer,
+            x: input.x,
+            y: input.y,
+            z: input.z,
+        }];
+        if moved {
+            let columns = self.stream_around(peer, center, now);
+            events.push(Event::ChunksStreamed {
+                peer,
+                chunk_x: center.0,
+                chunk_z: center.1,
+                columns,
+            });
+        }
+        events
     }
 
     /// Sends a batch through the peer's encrypted stream.
@@ -640,12 +768,7 @@ impl Server {
                 events.push(Event::PlayerInitialized(peer));
             } else if packet.id == ID_PLAYER_AUTH_INPUT {
                 if let Ok(input) = player::decode_auth_input(&packet.body) {
-                    events.push(Event::PlayerMoved {
-                        peer,
-                        x: input.x,
-                        y: input.y,
-                        z: input.z,
-                    });
+                    events.extend(self.on_player_moved(peer, input, now));
                 }
             } else {
                 events.push(Event::Decrypted {
@@ -720,6 +843,97 @@ mod tests {
         batch::encode(&[Packet::new(ID_LOGIN, w.finish())])
     }
 
+    /// A signed token and the key set that verifies it.
+    ///
+    /// These live in `bedrock-crypto`, which owns token verification and mints them in
+    /// its own tests. The point of reading them here is that the check is wired into
+    /// the login path at all: `bedrock-crypto` proves the verification is right, and
+    /// this proves the server actually calls it.
+    const TEST_JWKS: &str =
+        include_str!("../../bedrock-crypto/tests/fixtures/test-issuer.jwks.json");
+    const TEST_TOKEN: &str = include_str!("../../bedrock-crypto/tests/fixtures/identity.jwt");
+
+    /// When the fixture token was issued, and when it stops being good.
+    const TOKEN_ISSUED: i64 = 1_700_000_000;
+    const TOKEN_EXPIRY: i64 = 1_700_003_600;
+
+    fn a_server_that_can_verify(unix_now: i64) -> (Server, SocketAddr) {
+        let mut server = Server::new("0.0.0.0:19132".parse().unwrap(), 1, "MCPE;x");
+        let keys = Jwks::parse(TEST_JWKS).unwrap();
+        server.set_identity_keys(keys, unix_now, Instant::now());
+        assert!(server.can_verify_identity());
+        (server, "203.0.113.5:1234".parse().unwrap())
+    }
+
+    fn an_identity(token: &str) -> Vec<u8> {
+        a_login(&format!(r#"{{"Token":"{}"}}"#, token.trim()))
+    }
+
+    /// The criterion of M0.3b: a token that verifies gets in.
+    #[test]
+    fn a_login_whose_token_verifies_is_accepted() {
+        let (mut server, peer) = a_server_that_can_verify(TOKEN_ISSUED + 60);
+        let events = server.on_payload(peer, &an_identity(TEST_TOKEN), Instant::now());
+
+        let gamertag = events
+            .iter()
+            .find_map(|event| match event {
+                Event::LoginAccepted { gamertag, .. } => Some(gamertag.clone()),
+                _ => None,
+            })
+            .flatten();
+        assert_eq!(
+            gamertag.as_deref(),
+            Some("TestPlayer"),
+            "the name comes from the signed claims: {events:?}"
+        );
+    }
+
+    /// And the other half of it: the same token, later, does not.
+    ///
+    /// Same bytes, same keys — only the clock moved. A server that read the expiry and
+    /// did nothing with it would pass the test above and fail this one.
+    #[test]
+    fn a_login_whose_token_expired_is_refused() {
+        let (mut server, peer) = a_server_that_can_verify(TOKEN_EXPIRY + 3600);
+        let events = server.on_payload(peer, &an_identity(TEST_TOKEN), Instant::now());
+
+        let reason = events.iter().find_map(|event| match event {
+            Event::LoginRejected { reason, .. } => Some(reason.clone()),
+            _ => None,
+        });
+        assert!(
+            reason.as_deref().is_some_and(|why| why.contains("expired")),
+            "{events:?}"
+        );
+        assert!(
+            !server.ciphers.contains_key(&peer),
+            "a refused login starts no encrypted stream"
+        );
+    }
+
+    /// A real token with the claims edited is the attack the signature exists to stop,
+    /// and it has to be stopped here and not only in `bedrock-crypto`.
+    #[test]
+    fn a_login_whose_token_was_edited_is_refused() {
+        let (mut server, peer) = a_server_that_can_verify(TOKEN_ISSUED + 60);
+
+        let (header, rest) = TEST_TOKEN.trim().split_once('.').unwrap();
+        let (claims, signature) = rest.split_once('.').unwrap();
+        let mut edited = claims.to_owned();
+        edited.replace_range(0..1, if claims.starts_with('a') { "b" } else { "a" });
+
+        let events = server.on_payload(
+            peer,
+            &an_identity(&format!("{header}.{edited}.{signature}")),
+            Instant::now(),
+        );
+        assert!(
+            matches!(events.as_slice(), [Event::LoginRejected { .. }]),
+            "{events:?}"
+        );
+    }
+
     /// The property the whole milestone rests on: a server that cannot verify refuses.
     /// Falling back to accepting whoever asks, when a key fetch fails, is worse than
     /// never having checked — it looks authenticated and is not.
@@ -790,6 +1004,127 @@ mod tests {
         let keys = Jwks::parse(r#"{"keys":[]}"#).unwrap();
         with_keys.set_identity_keys(keys, 1_700_000_000, Instant::now());
         assert!(with_keys.can_verify_identity());
+    }
+
+    fn a_server_with_a_player_at_spawn() -> (Server, SocketAddr, usize) {
+        let mut server = Server::new("0.0.0.0:19132".parse().unwrap(), 1, "MCPE;x");
+        let peer: SocketAddr = "203.0.113.5:1234".parse().unwrap();
+
+        // No cipher, so nothing actually goes out — the bookkeeping this exercises is
+        // the same either way, and the encrypted path has its own tests.
+        let spawned = server.stream_world(peer, SERVER_CHUNK_RADIUS, Instant::now());
+        let Event::Spawned { columns, .. } = spawned else {
+            unreachable!("stream_world reports a spawn")
+        };
+        (server, peer, columns)
+    }
+
+    fn moves_to(server: &mut Server, peer: SocketAddr, x: f32, z: f32) -> Vec<Event> {
+        let input = player::AuthInput {
+            pitch: 0.0,
+            yaw: 0.0,
+            x,
+            y: SURFACE_HEIGHT as f32,
+            z,
+        };
+        server.on_player_moved(peer, input, Instant::now())
+    }
+
+    fn streamed(events: &[Event]) -> Option<usize> {
+        events.iter().find_map(|event| match event {
+            Event::ChunksStreamed { columns, .. } => Some(*columns),
+            _ => None,
+        })
+    }
+
+    /// Spawn covers the square around the origin, and nothing beyond it.
+    #[test]
+    fn spawning_streams_the_view_distance_around_the_origin() {
+        let (server, _, columns) = a_server_with_a_player_at_spawn();
+        let side = (SERVER_CHUNK_RADIUS * 2 + 1) as usize;
+        assert_eq!(columns, side * side);
+        assert_eq!(server.loaded_columns(), side * side);
+    }
+
+    /// The M0 criterion: a player who walks keeps being sent world. Before this, the
+    /// columns sent at spawn were all a player ever got, and walking far enough took
+    /// them past the edge of everything they had.
+    #[test]
+    fn crossing_into_a_new_column_streams_the_ground_ahead() {
+        let (mut server, peer, _) = a_server_with_a_player_at_spawn();
+
+        // Still inside the column they spawned in: nothing to send.
+        let events = moves_to(&mut server, peer, 15.0, 0.0);
+        assert_eq!(streamed(&events), None, "same column, no streaming");
+
+        // One block further is the next column, which brings one new row into view.
+        let events = moves_to(&mut server, peer, 16.0, 0.0);
+        let row = (SERVER_CHUNK_RADIUS * 2 + 1) as usize;
+        assert_eq!(streamed(&events), Some(row));
+    }
+
+    /// A position is a float and a column is not: block -1 belongs to column -1, and
+    /// truncating towards zero would put it in column 0 and stream nothing.
+    #[test]
+    fn walking_west_of_the_origin_crosses_a_column_too() {
+        let (mut server, peer, _) = a_server_with_a_player_at_spawn();
+        let events = moves_to(&mut server, peer, -0.5, 0.0);
+        let row = (SERVER_CHUNK_RADIUS * 2 + 1) as usize;
+        assert_eq!(streamed(&events), Some(row));
+    }
+
+    /// Ground already sent is not sent again. A player pacing back and forth over a
+    /// boundary would otherwise re-send a row of columns at every step.
+    #[test]
+    fn walking_back_over_ground_already_sent_costs_nothing() {
+        let (mut server, peer, _) = a_server_with_a_player_at_spawn();
+        moves_to(&mut server, peer, 16.0, 0.0);
+
+        let events = moves_to(&mut server, peer, 8.0, 0.0);
+        assert_eq!(streamed(&events), Some(0));
+    }
+
+    /// Far enough away, a column is forgotten — and coming back sends it again, because
+    /// a client that unloaded it is waiting for it.
+    #[test]
+    fn columns_left_far_behind_are_sent_again_on_the_way_back() {
+        let (mut server, peer, _) = a_server_with_a_player_at_spawn();
+
+        let far = ((SERVER_CHUNK_RADIUS + FORGET_MARGIN + 5) * level_chunk::CHUNK_WIDTH) as f32;
+        moves_to(&mut server, peer, far, 0.0);
+
+        let events = moves_to(&mut server, peer, 0.0, 0.0);
+        let side = (SERVER_CHUNK_RADIUS * 2 + 1) as usize;
+        assert_eq!(
+            streamed(&events),
+            Some(side * side),
+            "nothing around the origin was still remembered"
+        );
+    }
+
+    /// The world is generated once and kept: walking the same ground twice must not
+    /// generate it twice, which is what makes a change to it able to survive.
+    #[test]
+    fn walking_does_not_regenerate_ground_already_generated() {
+        let (mut server, peer, _) = a_server_with_a_player_at_spawn();
+        moves_to(&mut server, peer, 16.0, 0.0);
+        let after_walking = server.loaded_columns();
+
+        moves_to(&mut server, peer, 0.0, 0.0);
+        assert_eq!(server.loaded_columns(), after_walking);
+    }
+
+    /// A player who leaves takes their bookkeeping with them. Keeping it would leak a
+    /// set of columns per session for as long as the server runs.
+    #[test]
+    fn a_disconnect_forgets_the_player() {
+        let (mut server, peer, _) = a_server_with_a_player_at_spawn();
+        assert!(server.players.contains_key(&peer));
+
+        server.players.remove(&peer);
+        let events = moves_to(&mut server, peer, 16.0, 0.0);
+        assert_eq!(streamed(&events), None, "a stranger streams nothing");
+        assert!(matches!(events.as_slice(), [Event::PlayerMoved { .. }]));
     }
 
     #[test]

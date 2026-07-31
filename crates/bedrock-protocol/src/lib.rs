@@ -15,7 +15,8 @@
 //! on the decode path, no allocation sized by an attacker-controlled field, an explicit
 //! output cap on decompression. A malformed packet ends that session and nothing else.
 //!
-//! Status: not started. Milestones M0.3 and M0.4 — see `docs/ROADMAP.md`.
+//! Status: the login sequence, `StartGame` and `LevelChunk` are implemented and a
+//! real client plays against them — see `docs/ROADMAP.md`.
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
@@ -25,6 +26,7 @@ pub mod chunk_radius;
 pub mod handshake;
 pub mod level_chunk;
 pub mod login;
+pub mod palette;
 pub mod play_status;
 pub mod player;
 pub mod registries;

@@ -28,6 +28,7 @@ struct Options {
     name: String,
     dump: Option<String>,
     stage: Stage,
+    movement_step: f32,
 }
 
 /// Fetches the issuer's signing keys.
@@ -99,6 +100,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             last_refresh = now;
             match fetch_identity_keys() {
                 Ok(keys) => server.set_identity_keys(keys, unix_now(), now),
+                // The previous keys stay in place. Dropping them on a failed refresh
+                // would refuse every login until the issuer answered again, and the
+                // opposite — accepting whoever asks — is worse than either.
                 Err(e) => eprintln!("identidade    falha ao renovar as chaves: {e}"),
             }
         }
@@ -123,6 +127,10 @@ fn main() -> Result<(), Box<dyn Error>> {
 ///
 /// The client reports every tick, around twenty times a second. Printing each one buries
 /// everything else in the log without saying anything a coarser trail does not.
+///
+/// Adjustable because the right value depends on what is being watched: a walk across
+/// chunks reads well at a block, while a crouch moves the reported position by about a
+/// third of one and disappears entirely at this default.
 const MOVEMENT_STEP: f32 = 1.0;
 
 fn report(
@@ -139,10 +147,10 @@ fn report(
         }
         Event::PlayerMoved { peer, x, y, z } => {
             let far_enough = last_position.is_none_or(|(px, py, pz)| {
-                (x - px).abs().max((y - py).abs()).max((z - pz).abs()) >= MOVEMENT_STEP
+                (x - px).abs().max((y - py).abs()).max((z - pz).abs()) >= options.movement_step
             });
             if far_enough {
-                println!("moveu         {peer}  x={x:.1} y={y:.1} z={z:.1}");
+                println!("moveu         {peer}  x={x:.2} y={y:.2} z={z:.2}");
                 *last_position = Some((*x, *y, *z));
             }
         }
@@ -218,6 +226,18 @@ fn report(
         Event::Spawned { peer, columns } => {
             println!("  -> {columns} colunas + PlayStatus PlayerSpawn  {peer}");
         }
+        Event::ChunksStreamed {
+            peer,
+            chunk_x,
+            chunk_z,
+            columns,
+        } => {
+            // Crossing back into ground already sent costs nothing and says nothing;
+            // printing it would bury the moves that did stream world.
+            if *columns > 0 {
+                println!("  -> {columns} colunas  {peer}  entrou no chunk {chunk_x},{chunk_z}");
+            }
+        }
         Event::Decrypted { peer, id, len } => {
             println!("cifrado ok    {peer}  packet {id}, {len} bytes decifrados");
         }
@@ -275,6 +295,7 @@ fn parse_args() -> Result<Option<Options>, Box<dyn Error>> {
         name: "bedrock-runtime".to_owned(),
         dump: None,
         stage: Stage::Spawn,
+        movement_step: MOVEMENT_STEP,
     };
     let mut args = std::env::args().skip(1);
 
@@ -291,6 +312,12 @@ fn parse_args() -> Result<Option<Options>, Box<dyn Error>> {
             "--port" => options.port = args.next().ok_or("--port needs a value")?.parse()?,
             "--name" => options.name = args.next().ok_or("--name needs a value")?,
             "--dump" => options.dump = Some(args.next().ok_or("--dump needs a value")?),
+            "--movement-step" => {
+                options.movement_step = args
+                    .next()
+                    .ok_or("--movement-step needs a value")?
+                    .parse()?;
+            }
             "--stop-after" => {
                 let name = args.next().ok_or("--stop-after needs a value")?;
                 options.stage = Stage::parse(&name)
@@ -317,6 +344,10 @@ OPTIONS:
     --port <PORT>    UDP port to bind (default {DEFAULT_PORT})
     --name <NAME>    Name shown in the client's server list
     --dump <DIR>     Write unhandled packets there, for protocol work
+    --movement-step <BLOCKS>
+                     How far the player must move before the position is
+                     printed again (default 1). Lower it to watch small
+                     movements such as crouching.
     --stop-after <STAGE>
                      Stop early: start-game, world, radius, chunks, spawn.
                      For bisecting a client that closes on a malformed packet.

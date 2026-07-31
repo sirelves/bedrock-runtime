@@ -12,7 +12,9 @@
 //! Non-negotiable: no key material is ever logged, at any level; comparisons of secret
 //! material are constant-time. See `SECURITY.md`.
 //!
-//! Status: not started. Milestone M0.3 — see `docs/ROADMAP.md`.
+//! Status: key agreement, session key derivation and the stream cipher are
+//! implemented and confirmed against a real client. Fetching the issuer's keys over
+//! HTTP is the caller's job and is still M0.3b — see `docs/ROADMAP.md`.
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
