@@ -15,3 +15,6 @@ Cargo.lock.orig
 plan.md
 
 .DS_Store
+
+# logs de execucao local
+*.log
