@@ -196,7 +196,7 @@ pub enum Event {
         peer: SocketAddr,
         /// Where they say they are, along X.
         x: f32,
-        /// Along Y. This is the feet, so standing on the surface reports the surface.
+        /// Along Y, 1.62 above the feet — see `bedrock_protocol::player::POSITION_OFFSET`.
         y: f32,
         /// Along Z.
         z: f32,
@@ -571,7 +571,7 @@ impl Server {
             return 0;
         };
         let radius = player.radius;
-        let feet = player.position.1 as i32;
+        let feet = (player.position.1 - player::POSITION_OFFSET) as i32;
         player.center = center;
 
         // Columns far behind are forgotten so that walking back into them sends them

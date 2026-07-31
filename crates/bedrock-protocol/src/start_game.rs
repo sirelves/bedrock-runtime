@@ -36,6 +36,7 @@
 
 use crate::batch::Packet;
 use crate::bytes::Writer;
+use crate::player;
 
 /// `StartGame`, server to client.
 pub const ID_START_GAME: u32 = 11;
@@ -72,7 +73,8 @@ pub struct StartGame {
     pub runtime_id: u64,
     /// The mode the joining player is in.
     pub game_type: GameType,
-    /// Where the player appears.
+    /// Where the player appears, [`crate::player::POSITION_OFFSET`] above the block
+    /// they should be standing on.
     pub position: (f32, f32, f32),
     /// Where the player looks, in degrees.
     pub rotation: (f32, f32),
@@ -102,8 +104,11 @@ impl StartGame {
             entity_id: 1,
             runtime_id: 1,
             game_type: GameType::Creative,
-            // Feet at the surface: the topmost solid block is the one below it.
-            position: (0.5, surface_height as f32, 0.5),
+            // A position on the wire is 1.62 above the feet, so the surface height
+            // alone spawns the player a block and a half inside the ground — observed
+            // against a real client, which had to climb out. See
+            // `crate::player::POSITION_OFFSET`.
+            position: (0.5, surface_height as f32 + player::POSITION_OFFSET, 0.5),
             rotation: (0.0, 0.0),
             seed: 0,
             generator: Generator::Flat,
@@ -262,8 +267,24 @@ mod tests {
         assert_eq!(r.zigzag32().unwrap(), GameType::Creative as i32);
 
         assert!((r.f32().unwrap() - 0.5).abs() < f32::EPSILON, "x");
-        assert!((r.f32().unwrap() - 80.0).abs() < f32::EPSILON, "y");
+        assert!(
+            (r.f32().unwrap() - (80.0 + player::POSITION_OFFSET)).abs() < f32::EPSILON,
+            "y is the offset position, not the surface"
+        );
         assert!((r.f32().unwrap() - 0.5).abs() < f32::EPSILON, "z");
+    }
+
+    /// The bug a real client found on 2026-07-31: spawning at the surface height put
+    /// the player a block and a half inside the ground, and they had to climb out.
+    /// It only became visible once the world had ground in it.
+    #[test]
+    fn spawning_puts_the_feet_on_the_surface_not_inside_it() {
+        let world = StartGame::flat("w", "1.26.30", "test", 80);
+        let feet = world.position.1 - player::POSITION_OFFSET;
+        assert!(
+            (feet - 80.0).abs() < f32::EPSILON,
+            "feet at {feet}, surface at 80"
+        );
     }
 
     /// The spawn biome is a fixed u16 and the dimension a varint. Reading the biome as

@@ -16,6 +16,19 @@ pub const ID_PLAYER_AUTH_INPUT: u32 = 144;
 /// client that silently discards every column never sends it.
 pub const ID_SET_LOCAL_PLAYER_AS_INITIALIZED: u32 = 113;
 
+/// How far above the feet a reported position sits.
+///
+/// Measured against a real client, 2026-07-31, standing on a flat world whose surface
+/// is at y = 80: the client reported 81.66. It is **not** the camera — crouching moved
+/// the camera down and did not change the reported position by so much as a
+/// hundredth of a block, with the log threshold at 0.05.
+///
+/// The same offset applies to what the server sends. A `StartGame` position of 80 put
+/// the player's feet at 78.4, a block and a half inside the stone, and they had to
+/// climb out. This was invisible until the world had ground in it: in an empty world
+/// there is nothing to spawn inside of.
+pub const POSITION_OFFSET: f32 = 1.62;
+
 /// Where the client says the player is and where they are looking.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AuthInput {
@@ -25,10 +38,18 @@ pub struct AuthInput {
     pub yaw: f32,
     /// Position along X.
     pub x: f32,
-    /// Position along Y. This is the feet, not the eyes.
+    /// Position along Y, [`POSITION_OFFSET`] above the feet. Not the feet, and not the
+    /// camera either — see the constant.
     pub y: f32,
     /// Position along Z.
     pub z: f32,
+}
+
+impl AuthInput {
+    /// Where the player is standing, which is what a block lookup needs.
+    pub fn feet_y(&self) -> f32 {
+        self.y - POSITION_OFFSET
+    }
 }
 
 /// Decodes the head of a `PlayerAuthInput` body.
