@@ -18,7 +18,7 @@ use crate::connect::{
     ID_OPEN_CONNECTION_REQUEST_1, ID_OPEN_CONNECTION_REQUEST_2, PROTOCOL_VERSION, payload_limit,
 };
 use crate::offline::{ID_UNCONNECTED_PING, ID_UNCONNECTED_PONG};
-use crate::session::{Config, Session, SessionError, State};
+use crate::session::{Closed, Config, Session, SessionError, State};
 use crate::wire::{Reader, Writer};
 use crate::{MAGIC, MAX_MTU, UDP_IP_OVERHEAD};
 use std::collections::{HashMap, VecDeque};
@@ -33,8 +33,9 @@ pub enum Event {
     Connected(SocketAddr),
     /// The peer sent a payload.
     Payload(SocketAddr, Vec<u8>),
-    /// The peer went away, by disconnect or by timeout.
-    Disconnected(SocketAddr),
+    /// The peer went away. Carries why: a peer that left and a peer we gave up on
+    /// point at opposite bugs.
+    Disconnected(SocketAddr, Closed),
 }
 
 /// What the listener will spend before a peer has proved anything.
@@ -154,16 +155,16 @@ impl Listener {
             // On the transition, not on every datagram after it: an application reading
             // Connected as "a player joined" would otherwise see one join per packet.
             let connected = before != State::Connected && session.state() == State::Connected;
-            let closed = session.is_closed();
+            let closed = session.closed_because();
             Self::drain(&mut self.outbox, from, session);
 
             let mut events: Vec<Event> = payloads
                 .into_iter()
                 .map(|payload| Event::Payload(from, payload))
                 .collect();
-            if closed {
+            if let Some(reason) = closed {
                 self.sessions.remove(&from);
-                events.push(Event::Disconnected(from));
+                events.push(Event::Disconnected(from, reason));
             } else if connected {
                 events.insert(0, Event::Connected(from));
             }
@@ -278,14 +279,14 @@ impl Listener {
             while let Some(datagram) = session.poll_transmit() {
                 self.outbox.push_back((peer, datagram));
             }
-            if session.is_closed() {
-                gone.push(peer);
+            if let Some(reason) = session.closed_because() {
+                gone.push((peer, reason));
             }
         }
 
-        for peer in gone {
+        for (peer, reason) in gone {
             self.sessions.remove(&peer);
-            events.push(Event::Disconnected(peer));
+            events.push(Event::Disconnected(peer, reason));
         }
         events
     }
@@ -502,7 +503,7 @@ mod tests {
         assert_eq!(l.sessions(), 1);
 
         let events = l.tick(t + Duration::from_secs(30));
-        assert_eq!(events, vec![Event::Disconnected(peer(1))]);
+        assert_eq!(events, vec![Event::Disconnected(peer(1), Closed::Timeout)]);
         assert_eq!(l.sessions(), 0);
     }
 

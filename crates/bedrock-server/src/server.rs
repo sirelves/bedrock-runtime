@@ -28,6 +28,7 @@ use bedrock_protocol::resource_packs::{self, ID_RESOURCE_PACK_CLIENT_RESPONSE, R
 use bedrock_protocol::start_game::StartGame;
 use bedrock_protocol::version::{MINECRAFT_VERSION, PROTOCOL_VERSION};
 use bedrock_raknet::listener::{Event as RakEvent, Listener, ListenerConfig};
+pub use bedrock_raknet::session::Closed;
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -177,8 +178,8 @@ pub enum Event {
     },
     /// A payload that did not decode as a batch.
     Undecodable(SocketAddr, Vec<u8>),
-    /// A peer went away.
-    Disconnected(SocketAddr),
+    /// A peer went away, and why.
+    Disconnected(SocketAddr, Closed),
 }
 
 /// The advertisement a client matches against its own version.
@@ -301,7 +302,7 @@ impl Server {
             .tick(now)
             .into_iter()
             .filter_map(|event| match event {
-                RakEvent::Disconnected(peer) => Some(Event::Disconnected(peer)),
+                RakEvent::Disconnected(peer, reason) => Some(Event::Disconnected(peer, reason)),
                 _ => None,
             })
             .collect()
@@ -313,12 +314,12 @@ impl Server {
         for event in self.listener.receive(from, bytes, now) {
             match event {
                 RakEvent::Connected(peer) => events.push(Event::Connected(peer)),
-                RakEvent::Disconnected(peer) => {
+                RakEvent::Disconnected(peer, reason) => {
                     self.settled.remove(&peer);
                     self.keys.remove(&peer);
                     self.ciphers.remove(&peer);
                     self.protocols.remove(&peer);
-                    events.push(Event::Disconnected(peer));
+                    events.push(Event::Disconnected(peer, reason));
                 }
                 RakEvent::Payload(peer, payload) => {
                     events.extend(self.on_payload(peer, &payload, now));

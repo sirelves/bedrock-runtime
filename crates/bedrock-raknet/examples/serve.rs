@@ -53,7 +53,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             for event in listener.receive(from, &buf[..len], now) {
                 match event {
                     Event::Connected(peer) => println!("connected     {peer}"),
-                    Event::Disconnected(peer) => println!("disconnected  {peer}"),
+                    Event::Disconnected(peer, reason) => {
+                        println!("disconnected  {peer}  {reason:?}")
+                    }
                     Event::Payload(peer, payload) => {
                         println!("payload       {peer}  {} bytes", payload.len());
                         println!("  hex   {}", hex(&payload));
@@ -72,7 +74,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
 
         for event in listener.tick(now) {
-            if let Event::Disconnected(peer) = event {
+            if let Event::Disconnected(peer, _) = event {
                 println!("timed out     {peer}");
             }
         }
