@@ -20,26 +20,31 @@ pub const ID_RESOURCE_PACK_STACK: u32 = 7;
 pub const ID_RESOURCE_PACK_CLIENT_RESPONSE: u32 = 8;
 
 /// What the client says about the packs it was offered.
+///
+/// The wire values start at one. Mojang's published schema lists the names without
+/// numbers, and reading that list as zero-indexed shifts every response by one — so a
+/// client asking for the pack stack reads as a client that is finished, and gets a
+/// world in the middle of a negotiation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Response {
-    /// The client is leaving.
-    Cancel = 0,
-    /// The client is fetching packs.
-    Downloading = 1,
-    /// The client has everything from [`ID_RESOURCE_PACKS_INFO`].
-    DownloadingFinished = 2,
-    /// The client has applied the stack and is ready for the world.
-    StackFinished = 3,
+    /// The client will not take the packs and is leaving.
+    Refused = 1,
+    /// The client wants the packs it listed.
+    SendPacks = 2,
+    /// The client has every pack and wants the stack that orders them.
+    HaveAllPacks = 3,
+    /// The negotiation is over and the client is ready for a world.
+    Completed = 4,
 }
 
 impl Response {
     /// Reads the wire value.
     pub fn from_value(value: u8) -> Option<Self> {
         Some(match value {
-            0 => Self::Cancel,
-            1 => Self::Downloading,
-            2 => Self::DownloadingFinished,
-            3 => Self::StackFinished,
+            1 => Self::Refused,
+            2 => Self::SendPacks,
+            3 => Self::HaveAllPacks,
+            4 => Self::Completed,
             _ => return None,
         })
     }
@@ -93,13 +98,20 @@ mod tests {
     #[test]
     fn every_response_round_trips() {
         for (value, expected) in [
-            (0, Response::Cancel),
-            (1, Response::Downloading),
-            (2, Response::DownloadingFinished),
-            (3, Response::StackFinished),
+            (1, Response::Refused),
+            (2, Response::SendPacks),
+            (3, Response::HaveAllPacks),
+            (4, Response::Completed),
         ] {
             assert_eq!(decode_response(&[value]).unwrap(), Some(expected));
         }
+    }
+
+    /// Zero is not a response. Treating the published name list as zero-indexed shifts
+    /// everything by one, and a client asking for the stack reads as one that is done.
+    #[test]
+    fn zero_is_not_a_response() {
+        assert_eq!(decode_response(&[0]).unwrap(), None);
     }
 
     #[test]
