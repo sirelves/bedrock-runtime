@@ -843,6 +843,97 @@ mod tests {
         batch::encode(&[Packet::new(ID_LOGIN, w.finish())])
     }
 
+    /// A signed token and the key set that verifies it.
+    ///
+    /// These live in `bedrock-crypto`, which owns token verification and mints them in
+    /// its own tests. The point of reading them here is that the check is wired into
+    /// the login path at all: `bedrock-crypto` proves the verification is right, and
+    /// this proves the server actually calls it.
+    const TEST_JWKS: &str =
+        include_str!("../../bedrock-crypto/tests/fixtures/test-issuer.jwks.json");
+    const TEST_TOKEN: &str = include_str!("../../bedrock-crypto/tests/fixtures/identity.jwt");
+
+    /// When the fixture token was issued, and when it stops being good.
+    const TOKEN_ISSUED: i64 = 1_700_000_000;
+    const TOKEN_EXPIRY: i64 = 1_700_003_600;
+
+    fn a_server_that_can_verify(unix_now: i64) -> (Server, SocketAddr) {
+        let mut server = Server::new("0.0.0.0:19132".parse().unwrap(), 1, "MCPE;x");
+        let keys = Jwks::parse(TEST_JWKS).unwrap();
+        server.set_identity_keys(keys, unix_now, Instant::now());
+        assert!(server.can_verify_identity());
+        (server, "203.0.113.5:1234".parse().unwrap())
+    }
+
+    fn an_identity(token: &str) -> Vec<u8> {
+        a_login(&format!(r#"{{"Token":"{}"}}"#, token.trim()))
+    }
+
+    /// The criterion of M0.3b: a token that verifies gets in.
+    #[test]
+    fn a_login_whose_token_verifies_is_accepted() {
+        let (mut server, peer) = a_server_that_can_verify(TOKEN_ISSUED + 60);
+        let events = server.on_payload(peer, &an_identity(TEST_TOKEN), Instant::now());
+
+        let gamertag = events
+            .iter()
+            .find_map(|event| match event {
+                Event::LoginAccepted { gamertag, .. } => Some(gamertag.clone()),
+                _ => None,
+            })
+            .flatten();
+        assert_eq!(
+            gamertag.as_deref(),
+            Some("TestPlayer"),
+            "the name comes from the signed claims: {events:?}"
+        );
+    }
+
+    /// And the other half of it: the same token, later, does not.
+    ///
+    /// Same bytes, same keys — only the clock moved. A server that read the expiry and
+    /// did nothing with it would pass the test above and fail this one.
+    #[test]
+    fn a_login_whose_token_expired_is_refused() {
+        let (mut server, peer) = a_server_that_can_verify(TOKEN_EXPIRY + 3600);
+        let events = server.on_payload(peer, &an_identity(TEST_TOKEN), Instant::now());
+
+        let reason = events.iter().find_map(|event| match event {
+            Event::LoginRejected { reason, .. } => Some(reason.clone()),
+            _ => None,
+        });
+        assert!(
+            reason.as_deref().is_some_and(|why| why.contains("expired")),
+            "{events:?}"
+        );
+        assert!(
+            !server.ciphers.contains_key(&peer),
+            "a refused login starts no encrypted stream"
+        );
+    }
+
+    /// A real token with the claims edited is the attack the signature exists to stop,
+    /// and it has to be stopped here and not only in `bedrock-crypto`.
+    #[test]
+    fn a_login_whose_token_was_edited_is_refused() {
+        let (mut server, peer) = a_server_that_can_verify(TOKEN_ISSUED + 60);
+
+        let (header, rest) = TEST_TOKEN.trim().split_once('.').unwrap();
+        let (claims, signature) = rest.split_once('.').unwrap();
+        let mut edited = claims.to_owned();
+        edited.replace_range(0..1, if claims.starts_with('a') { "b" } else { "a" });
+
+        let events = server.on_payload(
+            peer,
+            &an_identity(&format!("{header}.{edited}.{signature}")),
+            Instant::now(),
+        );
+        assert!(
+            matches!(events.as_slice(), [Event::LoginRejected { .. }]),
+            "{events:?}"
+        );
+    }
+
     /// The property the whole milestone rests on: a server that cannot verify refuses.
     /// Falling back to accepting whoever asks, when a key fetch fails, is worse than
     /// never having checked — it looks authenticated and is not.

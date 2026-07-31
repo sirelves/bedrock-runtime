@@ -100,6 +100,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             last_refresh = now;
             match fetch_identity_keys() {
                 Ok(keys) => server.set_identity_keys(keys, unix_now(), now),
+                // The previous keys stay in place. Dropping them on a failed refresh
+                // would refuse every login until the issuer answered again, and the
+                // opposite — accepting whoever asks — is worse than either.
                 Err(e) => eprintln!("identidade    falha ao renovar as chaves: {e}"),
             }
         }
