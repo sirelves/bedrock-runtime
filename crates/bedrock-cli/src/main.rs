@@ -85,6 +85,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut last_refresh = Instant::now();
 
     let mut captured = 0usize;
+    let mut last_position: Option<(f32, f32, f32)> = None;
     let mut buf = [0u8; 2048];
 
     loop {
@@ -109,7 +110,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         events.extend(server.tick(now));
 
         for event in events {
-            report(&event, &options, &mut captured)?;
+            report(&event, &options, &mut captured, &mut last_position)?;
         }
 
         while let Some((to, datagram)) = server.poll_transmit() {
@@ -118,9 +119,33 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 }
 
-fn report(event: &Event, options: &Options, captured: &mut usize) -> Result<(), Box<dyn Error>> {
+/// How far the player must move before their position is worth printing again.
+///
+/// The client reports every tick, around twenty times a second. Printing each one buries
+/// everything else in the log without saying anything a coarser trail does not.
+const MOVEMENT_STEP: f32 = 1.0;
+
+fn report(
+    event: &Event,
+    options: &Options,
+    captured: &mut usize,
+    last_position: &mut Option<(f32, f32, f32)>,
+) -> Result<(), Box<dyn Error>> {
     match event {
         Event::Connected(peer) => println!("connected     {peer}"),
+        Event::PlayerInitialized(peer) => {
+            println!("NO MUNDO      {peer}");
+            println!("  o cliente confirmou que carregou e o jogador esta de pe");
+        }
+        Event::PlayerMoved { peer, x, y, z } => {
+            let far_enough = last_position.is_none_or(|(px, py, pz)| {
+                (x - px).abs().max((y - py).abs()).max((z - pz).abs()) >= MOVEMENT_STEP
+            });
+            if far_enough {
+                println!("moveu         {peer}  x={x:.1} y={y:.1} z={z:.1}");
+                *last_position = Some((*x, *y, *z));
+            }
+        }
         Event::Disconnected(peer, reason) => {
             let (label, meaning) = match reason {
                 Closed::ByPeer => ("saiu", "o cliente enviou Disconnect: recusou algo"),
