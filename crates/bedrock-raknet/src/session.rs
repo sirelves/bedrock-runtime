@@ -47,6 +47,22 @@ use std::time::{Duration, Instant};
 /// guessing which of the two a low id meant is how a ping becomes a lost payload.
 pub const USER_PACKET_START: u8 = 0x86;
 
+/// Why a session ended.
+///
+/// A log that only says "disconnected" cannot tell a peer that left from a peer we
+/// gave up on, and those point at opposite bugs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Closed {
+    /// The peer sent a disconnect.
+    ByPeer,
+    /// Nothing was heard for [`Config::timeout`].
+    Timeout,
+    /// A datagram went unacknowledged past the retry limit.
+    Unreachable,
+    /// We closed it.
+    ByUs,
+}
+
 /// How far a session has got.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum State {
@@ -54,8 +70,8 @@ pub enum State {
     Connecting,
     /// Handshake done; payloads flow.
     Connected,
-    /// Finished, by disconnect or by giving up on the peer.
-    Closed,
+    /// Finished. Carries why.
+    Closed(Closed),
 }
 
 /// What a session will spend on one peer.
@@ -218,7 +234,15 @@ impl Session {
 
     /// Whether the session is finished and should be dropped.
     pub fn is_closed(&self) -> bool {
-        self.state == State::Closed
+        matches!(self.state, State::Closed(_))
+    }
+
+    /// Why the session ended, once it has.
+    pub fn closed_because(&self) -> Option<Closed> {
+        match self.state {
+            State::Closed(reason) => Some(reason),
+            _ => None,
+        }
     }
 
     /// Milliseconds since the session opened, as RakNet timestamps them.
@@ -233,7 +257,7 @@ impl Session {
 
     /// Queues a payload for the peer, splitting it if it does not fit.
     pub fn send(&mut self, payload: Vec<u8>, now: Instant) -> Result<(), SessionError> {
-        if self.state == State::Closed {
+        if self.is_closed() {
             return Err(SessionError::Closed);
         }
         let capacity = fragment_capacity(self.config.payload_limit);
@@ -321,7 +345,7 @@ impl Session {
 
     /// Feeds one datagram in and returns the payloads it completed.
     pub fn receive(&mut self, bytes: &[u8], now: Instant) -> Result<Vec<Vec<u8>>, SessionError> {
-        if self.state == State::Closed {
+        if self.is_closed() {
             return Err(SessionError::Closed);
         }
         self.last_heard = now;
@@ -415,7 +439,7 @@ impl Session {
                 Ok(None)
             }
             Some(&ID_DISCONNECT) => {
-                self.state = State::Closed;
+                self.state = State::Closed(Closed::ByPeer);
                 Ok(None)
             }
             Some(&id) if id >= USER_PACKET_START => Ok(Some(payload)),
@@ -437,14 +461,16 @@ impl Session {
 
     /// Retransmits, acknowledges and checks the peer is still there.
     pub fn tick(&mut self, now: Instant) {
-        if self.state == State::Closed {
+        if self.is_closed() {
             return;
         }
 
-        if now.duration_since(self.last_heard) >= self.config.timeout
-            || self.retransmitter.is_dead()
-        {
-            self.state = State::Closed;
+        if now.duration_since(self.last_heard) >= self.config.timeout {
+            self.state = State::Closed(Closed::Timeout);
+            return;
+        }
+        if self.retransmitter.is_dead() {
+            self.state = State::Closed(Closed::Unreachable);
             return;
         }
 
@@ -488,11 +514,11 @@ impl Session {
 
     /// Queues a disconnect and closes.
     pub fn close(&mut self, now: Instant) {
-        if self.state == State::Closed {
+        if self.is_closed() {
             return;
         }
         let _ = self.send(vec![ID_DISCONNECT], now);
-        self.state = State::Closed;
+        self.state = State::Closed(Closed::ByUs);
     }
 }
 
@@ -695,7 +721,11 @@ mod tests {
         assert_eq!(a.state(), State::Connecting);
 
         a.tick(t + Duration::from_secs(21));
-        assert_eq!(a.state(), State::Closed);
+        assert_eq!(
+            a.closed_because(),
+            Some(Closed::Timeout),
+            "silence is a timeout, not a peer leaving"
+        );
     }
 
     #[test]
@@ -717,8 +747,8 @@ mod tests {
         let (mut a, mut b) = (session(t), session(t));
         a.close(t);
         pump(&mut a, &mut b, t);
-        assert_eq!(b.state(), State::Closed);
-        assert_eq!(a.state(), State::Closed);
+        assert_eq!(b.closed_because(), Some(Closed::ByPeer));
+        assert_eq!(a.closed_because(), Some(Closed::ByUs));
     }
 
     #[test]

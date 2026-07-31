@@ -5,7 +5,7 @@
 //!
 //! Game logic in this crate is a bug.
 
-use bedrock_server::server::Stage;
+use bedrock_server::server::{Closed, Stage};
 use bedrock_server::server::{
     DEFAULT_PORT, Event, Jwks, Server, TARGET_PROTOCOL, TOKEN_KEYS_URL, advertisement,
 };
@@ -121,7 +121,18 @@ fn main() -> Result<(), Box<dyn Error>> {
 fn report(event: &Event, options: &Options, captured: &mut usize) -> Result<(), Box<dyn Error>> {
     match event {
         Event::Connected(peer) => println!("connected     {peer}"),
-        Event::Disconnected(peer) => println!("disconnected  {peer}"),
+        Event::Disconnected(peer, reason) => {
+            let (label, meaning) = match reason {
+                Closed::ByPeer => ("saiu", "o cliente enviou Disconnect: recusou algo"),
+                Closed::Timeout => ("silencio", "20s sem falar: ficou esperando, nao recusou"),
+                Closed::Unreachable => ("inalcancavel", "parou de confirmar o que enviamos"),
+                Closed::ByUs => ("fechado por nos", ""),
+            };
+            println!("desconectou   {peer}  [{label}]");
+            if !meaning.is_empty() {
+                println!("  {meaning}");
+            }
+        }
         Event::NetworkSettingsRequested {
             peer,
             client_protocol,
