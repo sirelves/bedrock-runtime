@@ -553,11 +553,11 @@ impl Server {
                     // StackFinished straight away rather than walking the two-step
                     // flow, so waiting only for DownloadingFinished leaves it hanging.
                     match response {
-                        Response::DownloadingFinished => {
+                        Response::HaveAllPacks => {
                             let stack = resource_packs::pack_stack_empty(MINECRAFT_VERSION);
                             self.send_encrypted(peer, &[stack], now);
                         }
-                        Response::StackFinished => {
+                        Response::Completed => {
                             events.push(Event::ReadyForWorld(peer));
 
                             let world = StartGame::flat(

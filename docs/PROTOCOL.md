@@ -104,7 +104,24 @@ versão que o servidor fala. Não há motivo para adivinhar: pergunte.
 de 1200 passou; noutra, contra o mesmo servidor, 1492 respondeu. Não é precaução
 teórica — o caminho muda.
 
-### Negociação de pacotes — confirmada
+### Negociação de pacotes — corrigida
+
+**Os valores de resposta começam em 1, não em 0.** O schema publicado pela Mojang lista
+os nomes sem números — `['Cancel', 'Downloading', 'DownloadingFinished',
+'ResourcePackStackFinished']` — e ler essa lista como indexada em zero desloca toda
+resposta em um.
+
+O efeito: um cliente mandando `3`, que significa **"tenho todos os pacotes, me manda o
+stack"**, é lido como "terminei" — e recebe um `StartGame` no meio da negociação. O
+cliente fecha na hora.
+
+Os valores reais: `1` recusou, `2` quer estes pacotes, `3` tem todos e quer o stack,
+`4` terminou.
+
+Um servidor sem pacote nenhum ainda precisa mandar o `ResourcePackStack`. Não é
+opcional: é a resposta ao `3`, e sem ela a sequência não avança para o `4`.
+
+### Negociação de pacotes — o que já estava certo
 
 Um servidor sem pacote nenhum ainda precisa oferecer: o cliente não aceita um mundo
 antes de responder. Mas **a negociação é mais curta do que o caso geral sugere**.
