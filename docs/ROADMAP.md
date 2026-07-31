@@ -79,15 +79,17 @@ próprio critério — eram seis até o proxy de captura ser removido
 - **Fecha quando:** um login com token inválido ou expirado é recusado com
   `PlayStatus` em vez de aceito.
 
-### M0.4 — Spawn
-- `ResourcePacks*` ✅, `StartGame` ✅, raio de chunk ✅, `LevelChunk`, `PlayStatus` de
-  player spawn.
-- **Fecha quando:** o cliente sai da tela de carregamento e mostra o jogador num mundo
-  (ainda que vazio), sem desconectar por 60 segundos.
-- **A paleta de blocos vazia foi aceita.** A aposta do
-  [ADR-015](DECISIONS.md#adr-015--sem-proxy-de-captura) valeu: um cliente real parseou o
-  `StartGame` com a lista de blocos vazia, entrou na tela de carregamento e pediu chunks.
-  Não é preciso extrair a paleta do servidor oficial.
+### M0.4 — Spawn ✅
+- `ResourcePacks*`, `StartGame`, raio de chunk, `LevelChunk`, `PlayStatus` de player
+  spawn.
+- **Fechou quando:** em 2026-07-30 um jogador saiu da tela de carregamento e apareceu no
+  mundo. O cliente enviou `SetLocalPlayerAsInitialized`, depois centenas de
+  `PlayerAuthInput` a ~20 por segundo, e a sessão não caiu.
+- **Paleta de blocos vazia foi aceita**, confirmando a aposta do
+  [ADR-015](DECISIONS.md#adr-015--sem-proxy-de-captura). **Registros vazios não foram** —
+  ver [PROTOCOL.md](PROTOCOL.md#registros-vazios-são-recusados).
+- O mundo é o vazio: as colunas não têm bloco nenhum porque nomear um bloco exige a
+  paleta da versão. Chão sólido é o próximo passo, não parte deste critério.
 
 ### M0.5 — Mundo gerado e movimentação
 - Gerador flat em memória, seções de chunk imutáveis
