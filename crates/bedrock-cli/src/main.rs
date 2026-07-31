@@ -28,6 +28,7 @@ struct Options {
     name: String,
     dump: Option<String>,
     stage: Stage,
+    movement_step: f32,
 }
 
 /// Fetches the issuer's signing keys.
@@ -123,6 +124,10 @@ fn main() -> Result<(), Box<dyn Error>> {
 ///
 /// The client reports every tick, around twenty times a second. Printing each one buries
 /// everything else in the log without saying anything a coarser trail does not.
+///
+/// Adjustable because the right value depends on what is being watched: a walk across
+/// chunks reads well at a block, while a crouch moves the reported position by about a
+/// third of one and disappears entirely at this default.
 const MOVEMENT_STEP: f32 = 1.0;
 
 fn report(
@@ -139,10 +144,10 @@ fn report(
         }
         Event::PlayerMoved { peer, x, y, z } => {
             let far_enough = last_position.is_none_or(|(px, py, pz)| {
-                (x - px).abs().max((y - py).abs()).max((z - pz).abs()) >= MOVEMENT_STEP
+                (x - px).abs().max((y - py).abs()).max((z - pz).abs()) >= options.movement_step
             });
             if far_enough {
-                println!("moveu         {peer}  x={x:.1} y={y:.1} z={z:.1}");
+                println!("moveu         {peer}  x={x:.2} y={y:.2} z={z:.2}");
                 *last_position = Some((*x, *y, *z));
             }
         }
@@ -287,6 +292,7 @@ fn parse_args() -> Result<Option<Options>, Box<dyn Error>> {
         name: "bedrock-runtime".to_owned(),
         dump: None,
         stage: Stage::Spawn,
+        movement_step: MOVEMENT_STEP,
     };
     let mut args = std::env::args().skip(1);
 
@@ -303,6 +309,12 @@ fn parse_args() -> Result<Option<Options>, Box<dyn Error>> {
             "--port" => options.port = args.next().ok_or("--port needs a value")?.parse()?,
             "--name" => options.name = args.next().ok_or("--name needs a value")?,
             "--dump" => options.dump = Some(args.next().ok_or("--dump needs a value")?),
+            "--movement-step" => {
+                options.movement_step = args
+                    .next()
+                    .ok_or("--movement-step needs a value")?
+                    .parse()?;
+            }
             "--stop-after" => {
                 let name = args.next().ok_or("--stop-after needs a value")?;
                 options.stage = Stage::parse(&name)
@@ -329,6 +341,10 @@ OPTIONS:
     --port <PORT>    UDP port to bind (default {DEFAULT_PORT})
     --name <NAME>    Name shown in the client's server list
     --dump <DIR>     Write unhandled packets there, for protocol work
+    --movement-step <BLOCKS>
+                     How far the player must move before the position is
+                     printed again (default 1). Lower it to watch small
+                     movements such as crouching.
     --stop-after <STAGE>
                      Stop early: start-game, world, radius, chunks, spawn.
                      For bisecting a client that closes on a malformed packet.
