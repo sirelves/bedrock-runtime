@@ -346,7 +346,23 @@ zlib/snappy entrarem.
 
 ## Camada 5 — Pacotes de jogo
 
-**Estado:** não iniciado.
+**Estado:** a sequência de login está completa. Um cliente real entra no mundo e joga.
+
+A ordem que funciona, confirmada contra um cliente:
+
+```text
+RequestNetworkSettings  ──►  NetworkSettings (compressão desligada)
+Login                   ──►  ServerToClientHandshake
+ClientToServerHandshake ──►  PlayStatus LoginSuccess, ResourcePacksInfo
+resposta 3 (tem tudo)   ──►  ResourcePackStack
+resposta 4 (terminou)   ──►  StartGame
+RequestChunkRadius      ──►  ChunkRadiusUpdated
+                        ──►  NetworkChunkPublisherUpdate, colunas, PlayStatus PlayerSpawn
+SetLocalPlayerAsInitialized  ◄── o cliente confirma que spawnou
+PlayerAuthInput ~20/s        ◄── o jogador está jogando
+```
+
+**Nenhum registro de item, entidade ou bioma é enviado.** Ver acima o porquê.
 
 Para o M0 ("entra, anda e vê chunks"), o conjunto mínimo é:
 
