@@ -23,6 +23,7 @@ use bedrock_protocol::handshake::{
 use bedrock_protocol::level_chunk::{self, BIOME_PLAINS};
 use bedrock_protocol::login::{self, ID_LOGIN, Login, TOKEN_AUDIENCE, TOKEN_ISSUER};
 use bedrock_protocol::play_status::{self, Status};
+use bedrock_protocol::player::{self, ID_PLAYER_AUTH_INPUT, ID_SET_LOCAL_PLAYER_AS_INITIALIZED};
 use bedrock_protocol::registries;
 use bedrock_protocol::resource_packs::{self, ID_RESOURCE_PACK_CLIENT_RESPONSE, Response};
 use bedrock_protocol::start_game::StartGame;
@@ -88,7 +89,10 @@ pub const TOKEN_KEYS_URL: &str = bedrock_protocol::login::TOKEN_KEYS_URL;
 pub use bedrock_crypto::jwt::Jwks;
 
 /// Something worth telling the operator about.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Not `Eq`: a reported position is a float, and one carried straight from the wire has
+/// no meaningful notion of exact equality.
+#[derive(Debug, Clone, PartialEq)]
 pub enum Event {
     /// A peer finished the transport handshake.
     Connected(SocketAddr),
@@ -159,6 +163,22 @@ pub enum Event {
         requested: i32,
         /// What it got.
         granted: i32,
+    },
+    /// The client reported the player standing in the world.
+    ///
+    /// This is the client's own statement that the chunks arrived and rendered. A client
+    /// that discards every column it is sent never reaches this point.
+    PlayerInitialized(SocketAddr),
+    /// The client reported where the player is.
+    PlayerMoved {
+        /// Who moved.
+        peer: SocketAddr,
+        /// Where they say they are, along X.
+        x: f32,
+        /// Along Y. This is the feet, so standing on the surface reports the surface.
+        y: f32,
+        /// Along Z.
+        z: f32,
     },
     /// An encrypted packet decrypted and its checksum held.
     Decrypted {
@@ -616,6 +636,17 @@ impl Server {
                 }
             } else if packet.id == ID_SERVERBOUND_LOADING_SCREEN {
                 // The client narrating its own loading screen. Nothing is expected back.
+            } else if packet.id == ID_SET_LOCAL_PLAYER_AS_INITIALIZED {
+                events.push(Event::PlayerInitialized(peer));
+            } else if packet.id == ID_PLAYER_AUTH_INPUT {
+                if let Ok(input) = player::decode_auth_input(&packet.body) {
+                    events.push(Event::PlayerMoved {
+                        peer,
+                        x: input.x,
+                        y: input.y,
+                        z: input.z,
+                    });
+                }
             } else {
                 events.push(Event::Decrypted {
                     peer,
