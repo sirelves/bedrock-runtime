@@ -104,6 +104,24 @@ versão que o servidor fala. Não há motivo para adivinhar: pergunte.
 de 1200 passou; noutra, contra o mesmo servidor, 1492 respondeu. Não é precaução
 teórica — o caminho muda.
 
+### Registros vazios são recusados
+
+A aposta que funcionou para a paleta de blocos **não vale** para os registros. Bissecção
+contra um cliente real:
+
+```text
+só StartGame              cliente espera, "localizando servidor" indefinidamente
+StartGame + 3 registros   cliente envia Disconnect
+```
+
+Uma lista de itens, entidades ou biomas vazia é lida como **"o servidor declara
+nenhum"**, não como "o servidor não sobrescreve". A paleta de blocos é a exceção, não a
+regra.
+
+E o cliente não precisa deles para um mundo vazio — sem os três, ele segue esperando o
+resto sem reclamar. Preenchê-los exige dados extraídos do jogo, que o
+[ADR-015](DECISIONS.md#adr-015--sem-proxy-de-captura) escolheu não fazer.
+
 ### Negociação de pacotes — corrigida
 
 **Os valores de resposta começam em 1, não em 0.** O schema publicado pela Mojang lista

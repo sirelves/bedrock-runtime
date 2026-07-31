@@ -568,11 +568,20 @@ impl Server {
                             );
                             self.send_encrypted(peer, &[world.packet()], now);
 
-                            // Items, entities and biomes, all empty. The chunks that
-                            // follow reference biome ids, and a client that was never
-                            // told the registry exists has to guess what to do with a
-                            // reference into a table it does not know it has.
-                            if self.stage >= Stage::World {
+                            // The registries are deliberately not sent. Bisection
+                            // showed a client waits patiently after StartGame alone and
+                            // disconnects as soon as the three empty registries arrive:
+                            // an empty item, entity or biome list reads as "the server
+                            // declares none" rather than "the server overrides none".
+                            //
+                            // Filling them needs data dumped from the game, which
+                            // ADR-015 chose not to do. They were added to fix a crash
+                            // that turned out to be the resource pack sequence, and the
+                            // guess outlived the problem.
+                            //
+                            // `--stop-after world` still sends them, so the day real
+                            // definitions exist the flag is the way to try them.
+                            if self.stage == Stage::World {
                                 for packet in registries::all_empty() {
                                     self.send_encrypted(peer, &[packet], now);
                                 }
