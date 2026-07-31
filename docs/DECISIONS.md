@@ -24,6 +24,7 @@ de ideia. Um ADR não é apagado; é substituído por outro que o marca como sup
 | [013](#adr-013--ring-para-criptografia) | `ring` para criptografia | Parcialmente superada por [014](#adr-014--p384-para-o-par-de-chaves-do-servidor) |
 | [014](#adr-014--p384-para-o-par-de-chaves-do-servidor) | `p384` para o par de chaves do servidor | Aceita |
 | [015](#adr-015--sem-proxy-de-captura) | Sem proxy de captura | Aceita |
+| [016](#adr-016--streaming-de-chunks-por-raio-fixo) | Streaming de chunks por raio fixo | Aceita, revisão obrigatória no M2 |
 
 ---
 
@@ -494,3 +495,52 @@ prova — só que a fonte da hipótese mudou.
 - Negativa: sem captura, um campo mal interpretado se manifesta como um cliente que
   desconecta sem explicação. Mitigado pelo mesmo método incremental que trouxe o projeto
   até aqui: um pacote por vez, verificando contra um cliente real.
+
+---
+
+## ADR-016 — Streaming de chunks por raio fixo
+
+**Contexto.** [ARCHITECTURE.md](ARCHITECTURE.md#o-que-ainda-não-está-decidido) lista
+"estratégia de view distance e streaming de chunks" entre as coisas não decididas, a
+serem fechadas com os números do primeiro benchmark. Mas o M0.5 exige um jogador que
+anda e continua vendo mundo, e isso não dá para entregar sem *alguma* estratégia.
+
+A tentação era desenhar a estratégia definitiva agora: fila de prioridade por distância,
+orçamento de colunas por tick, geração fora do tick, descarregamento por tempo ocioso.
+Cada uma dessas peças existe para resolver um problema de carga que ninguém mediu — e
+[PERFORMANCE.md](PERFORMANCE.md#a-regra) proíbe exatamente isso.
+
+**Decisão.** A coisa mais simples que satisfaz o M0.5, e nada além:
+
+- Raio fixo do servidor (`SERVER_CHUNK_RADIUS`), concedido como teto ao que o cliente
+  pedir.
+- Ao cruzar para outra coluna, reenviar `NetworkChunkPublisherUpdate` centrado nela e
+  mandar as colunas do quadrado que ainda não foram mandadas.
+- Um conjunto por jogador com o que já foi enviado. Colunas além do raio mais uma
+  margem de duas colunas são esquecidas, e voltar a elas as reenvia.
+- Tudo síncrono, dentro do tratamento do pacote.
+
+Esta decisão é **explicitamente provisória**. Ela existe para ser substituída pelo que
+o M2 medir, e está registrada para que a substituição seja um ato consciente.
+
+**Consequências.**
+- Positiva: o M0.5 fecha com código que cabe na cabeça, e o M2 mede uma linha de base
+  real em vez de medir um otimizador que ninguém pediu.
+- Positiva: o conjunto por jogador torna o custo de andar proporcional ao que é novo, e
+  não ao tamanho da view distance.
+- **Negativa: cruzar uma coluna serializa até uma fileira inteira de colunas dentro do
+  tick.** Com raio 4 são nove colunas; com raio 8, dezessete. Num mundo flat isso é
+  barato porque as seções são uniformes, e num mundo de verdade não será.
+- **Negativa: sem prioridade.** A coluna sob os pés do jogador e a coluna na diagonal
+  mais distante saem na mesma ordem em que o laço as visita, que é lexicográfica. O
+  cliente vê o mundo aparecer numa ordem que não é a que ele precisa.
+- **Negativa: o mundo só cresce.** Colunas geradas ficam em memória para sempre — o
+  jogador esquece, o `World` não. Num M0 de uma sessão isso é irrelevante e num servidor
+  de verdade é um vazamento.
+- **Negativa: raio fixo ignora o que o cliente pediu para baixo.** Um cliente que pede 2
+  recebe 2, mas um que pede 12 recebe 4 sem saber por quê.
+
+**O que nos faria mudar de ideia.** Os números do M2. Especificamente: se o tempo de
+serialização de colunas aparecer no p99 do MSPT com a carga de referência, a resposta é
+orçamento por tick e geração fora do tick — nessa ordem, e medindo entre uma e outra.
+Descarregamento de coluna entra quando houver mais de uma sessão longa, o que é M1.

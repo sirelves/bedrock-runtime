@@ -11,7 +11,8 @@
 //! server-side validation. This is a posture from M0, not an anti-cheat feature
 //! bolted on later — see `SECURITY.md`.
 //!
-//! Status: not started.
+//! Status: the login sequence runs end to end and chunks stream around a moving
+//! player — see `docs/ROADMAP.md`.
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 

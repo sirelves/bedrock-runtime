@@ -91,11 +91,22 @@ próprio critério — eram seis até o proxy de captura ser removido
 - O mundo é o vazio: as colunas não têm bloco nenhum porque nomear um bloco exige a
   paleta da versão. Chão sólido é o próximo passo, não parte deste critério.
 
-### M0.5 — Mundo gerado e movimentação
+### M0.5 — Mundo gerado e movimentação ✅
 - Gerador flat em memória, seções de chunk imutáveis
   ([ADR-010](DECISIONS.md#adr-010--seções-de-chunk-imutáveis)), `LevelChunk`,
-  `NetworkChunkPublisherUpdate`, streaming por raio, entrada de movimentação do jogador.
-- **Fecha quando:** o critério do M0 acima é satisfeito.
+  `NetworkChunkPublisherUpdate`, streaming por raio
+  ([ADR-016](DECISIONS.md#adr-016--streaming-de-chunks-por-raio-fixo)), entrada de
+  movimentação do jogador.
+- **Fechou quando:** em 2026-07-31 um jogador nasceu de pé no chão, caminhou e recebeu
+  mundo enquanto andava. O cliente reportou `y=81.62` fixo com a posição horizontal
+  avançando — caminhada, não voo — e cada travessia de coluna disparou nove colunas
+  novas, com o retorno sobre chão já enviado custando zero.
+- O mundo passou a ter dono: `bedrock-blocks` e `bedrock-world` deixaram de ser esboços,
+  e a geração saiu de dentro do `bedrock-protocol`, onde estava violando o grafo de
+  dependências.
+- **O chão sólido revelou um bug que o mundo vazio escondia:** uma posição no fio é
+  1,62 acima dos pés, então spawnar na altura da superfície enterrava o jogador. Ver
+  [PROTOCOL.md](PROTOCOL.md#uma-posição-no-fio-é-162-acima-dos-pés).
 
 ---
 
