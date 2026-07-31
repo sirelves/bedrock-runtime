@@ -58,6 +58,9 @@ pub const RUNTIME_ID_STONE: i32 = 2_706;
 /// Blocks tall a subchunk is.
 pub const SUBCHUNK_HEIGHT: i32 = 16;
 
+/// Blocks per chunk along X and Z. Same number as [`SUBCHUNK_HEIGHT`], different axis.
+pub const CHUNK_WIDTH: i32 = 16;
+
 /// Writes one subchunk's worth of biome, all of it the same.
 ///
 /// Zero bits per block is the single-value case: no word array, and no palette count
@@ -151,9 +154,17 @@ pub fn level_chunk(chunk_x: i32, chunk_z: i32, subchunks: usize, payload: &[u8])
 ///
 /// Tells the client which point to accept chunks around. Without it a client discards
 /// columns it did not expect, and the world stays empty however many are sent.
-pub fn publisher_update(x: i32, y: i32, z: i32, radius: u32) -> Packet {
+///
+/// The radius is in **blocks**, not chunks. Passing a chunk count shrinks the accept
+/// area by 16x, which discards every column but the one under the player — silently,
+/// with no disconnect and no complaint.
+pub fn publisher_update(x: i32, y: i32, z: i32, radius_blocks: u32) -> Packet {
     let mut w = Writer::new();
-    w.zigzag32(x).zigzag32(y).zigzag32(z).varint(radius).u32(0); // no saved chunks
+    w.zigzag32(x)
+        .zigzag32(y)
+        .zigzag32(z)
+        .varint(radius_blocks)
+        .u32(0); // no saved chunks
 
     Packet::new(ID_NETWORK_CHUNK_PUBLISHER_UPDATE, w.finish())
 }
@@ -296,15 +307,37 @@ mod tests {
 
     #[test]
     fn the_publisher_update_carries_its_centre_and_radius() {
-        let packet = publisher_update(0, 70, 0, 4);
+        let packet = publisher_update(0, 80, 0, 64);
         assert_eq!(packet.id, ID_NETWORK_CHUNK_PUBLISHER_UPDATE);
 
         let mut r = Reader::new(&packet.body);
         assert_eq!(r.zigzag32().unwrap(), 0);
-        assert_eq!(r.zigzag32().unwrap(), 70);
+        assert_eq!(r.zigzag32().unwrap(), 80);
         assert_eq!(r.zigzag32().unwrap(), 0);
-        assert_eq!(r.varint().unwrap(), 4);
+        assert_eq!(r.varint().unwrap(), 64);
         assert_eq!(r.u32().unwrap(), 0, "no saved chunks");
+    }
+
+    #[test]
+    fn the_publisher_radius_reaches_the_columns_we_send() {
+        let chunks = 4;
+        let packet = publisher_update(0, 80, 0, (chunks * CHUNK_WIDTH) as u32);
+
+        let mut r = Reader::new(&packet.body);
+        for _ in 0..3 {
+            r.zigzag32().unwrap();
+        }
+        let radius = r.varint().unwrap() as i32;
+
+        let furthest = columns_around(0, 0, chunks)
+            .iter()
+            .map(|&(x, z)| x.abs().max(z.abs()) * CHUNK_WIDTH)
+            .max()
+            .unwrap();
+
+        // A radius in chunk units falls 16x short. The client then drops every column
+        // but the one under the player, without disconnecting or complaining.
+        assert!(radius >= furthest, "radius {radius} must reach {furthest}");
     }
 
     #[test]

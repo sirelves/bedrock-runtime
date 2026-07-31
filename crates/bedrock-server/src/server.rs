@@ -478,9 +478,9 @@ impl Server {
             peer,
             &[level_chunk::publisher_update(
                 0,
-                70,
+                SURFACE_HEIGHT,
                 0,
-                radius.max(0) as u32,
+                (radius.max(0) * level_chunk::CHUNK_WIDTH) as u32,
             )],
             now,
         );
