@@ -13,4 +13,22 @@
 //! touches disk. Storage lands in M1, in a format of our own — compatibility with
 //! vanilla worlds is out of scope, see `docs/COMPATIBILITY.md`.
 //!
-//! Status: not started.
+//! ```
+//! use bedrock_world::World;
+//! use bedrock_blocks::STONE;
+//!
+//! let mut world = World::flat(80);
+//! assert_eq!(world.block_at(0, 79, 0), Some(&STONE), "standing on the ground");
+//! ```
+
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
+pub mod chunk;
+pub mod generator;
+pub mod section;
+pub mod world;
+
+pub use chunk::Chunk;
+pub use generator::Flat;
+pub use section::Section;
+pub use world::World;

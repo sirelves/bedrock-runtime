@@ -25,6 +25,7 @@ pub mod chunk_radius;
 pub mod handshake;
 pub mod level_chunk;
 pub mod login;
+pub mod palette;
 pub mod play_status;
 pub mod player;
 pub mod registries;

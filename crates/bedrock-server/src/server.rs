@@ -7,6 +7,7 @@
 //! It answers `RequestNetworkSettings` and nothing else yet. Everything past that is
 //! reported so a capture can be taken of bytes no third-party documentation covers.
 
+use crate::columns;
 use base64::Engine;
 use bedrock_crypto::agreement::ServerKey;
 use bedrock_crypto::cipher::Cipher;
@@ -30,6 +31,7 @@ use bedrock_protocol::start_game::StartGame;
 use bedrock_protocol::version::{MINECRAFT_VERSION, PROTOCOL_VERSION};
 use bedrock_raknet::listener::{Event as RakEvent, Listener, ListenerConfig};
 pub use bedrock_raknet::session::Closed;
+use bedrock_world::World;
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -232,6 +234,8 @@ pub struct Server {
     ciphers: HashMap<SocketAddr, Cipher>,
     /// The protocol version each peer declared at login.
     protocols: HashMap<SocketAddr, u32>,
+    /// The world itself. Generated in memory; no disk in M0 (ADR-011).
+    world: World,
     /// What the world calls itself in the client.
     world_name: String,
     /// How far the login sequence runs before stopping.
@@ -265,9 +269,15 @@ impl Server {
             keys: HashMap::new(),
             ciphers: HashMap::new(),
             protocols: HashMap::new(),
+            world: World::flat(SURFACE_HEIGHT),
             identity_keys: None,
             clock: None,
         }
+    }
+
+    /// Columns held in memory right now.
+    pub fn loaded_columns(&self) -> usize {
+        self.world.loaded()
     }
 
     /// Supplies the issuer's signing keys.
@@ -505,11 +515,9 @@ impl Server {
             now,
         );
 
-        let payload = level_chunk::flat_column(BIOME_PLAINS, SURFACE_HEIGHT);
-        let subchunks = level_chunk::subchunks_up_to(SURFACE_HEIGHT);
         let columns = level_chunk::columns_around(0, 0, radius);
         for &(x, z) in &columns {
-            let column = level_chunk::level_chunk(x, z, subchunks, &payload);
+            let column = columns::column_packet(self.world.chunk(x, z), BIOME_PLAINS);
             self.send_encrypted(peer, &[column], now);
         }
 
